@@ -14,10 +14,16 @@ function base64ToBytes(value: string) {
   return util.decodeBase64(value);
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 async function deriveKey(passphrase: string, salt: Uint8Array) {
   const material = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(passphrase),
+    toArrayBuffer(new TextEncoder().encode(passphrase)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -26,7 +32,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array) {
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: toArrayBuffer(salt),
       iterations: 250000,
       hash: "SHA-256"
     },
@@ -44,9 +50,9 @@ export async function createEncryptedCreatorKey(passphrase: string) {
   const aesKey = await deriveKey(passphrase, salt);
 
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     aesKey,
-    pair.secretKey
+    toArrayBuffer(pair.secretKey)
   );
 
   const vault = {
@@ -81,9 +87,9 @@ export async function signWithCreatorKey(message: string, passphrase: string) {
   let decrypted: ArrayBuffer;
   try {
     decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: base64ToBytes(vault.iv) },
+      { name: "AES-GCM", iv: toArrayBuffer(base64ToBytes(vault.iv)) },
       aesKey,
-      base64ToBytes(vault.encryptedSecret)
+      toArrayBuffer(base64ToBytes(vault.encryptedSecret))
     );
   } catch {
     throw new Error("Incorrect creator-key passphrase.");
