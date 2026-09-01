@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
-import { getStoredPublicKey, signWithCreatorKey } from "@/lib/hps/keyvault";
+import { getStoredPublicKey, signCanonicalWithCreatorKey } from "@/lib/hps/keyvault";
 
 const contributionOptions = [
   "concept","research","reasoning","writing","composition","algorithm_design",
@@ -58,41 +58,21 @@ export default function CreatePage() {
 
   async function createRecord(){
     setError(""); setCreating(true); setRecord(null);
-
     try{
       const {data:userData}=await supabase.auth.getUser();
       if(!userData.user) throw new Error("Please sign in first.");
       if(!publicKey) throw new Error("Create your HPS creator signing key in Account first.");
-
-      const unsignedPayload = JSON.stringify({
-        title, creatorName, workType, fileName, assetHash,
-        contributionTypes:contributions, aiUsed,
-        primaryTool:primaryTool||null,
-        processNoteHash: processNote ? await hashText(processNote) : null,
-        creatorPublicKey: publicKey
-      });
-
-      const signed = await signWithCreatorKey(unsignedPayload,keyPassphrase);
-
-      const response=await fetch("/api/records",{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:JSON.stringify({
-          title,creatorName,workType,fileName,assetHash,
-          contributionTypes:contributions,aiUsed,
-          primaryTool:primaryTool||undefined,
-          processNote:processNote||undefined,
-          creatorPublicKey:signed.publicKey,
-          creatorSignature:signed.signature,
-          unsignedPayload
-        })
-      });
-
-      const data=await response.json();
-      if(!response.ok) throw new Error(data.error||"Unable to create record.");
-      setRecord(data); setKeyPassphrase("");
-    }catch(e:any){setError(e.message||"Unable to create record.")}
-    finally{setCreating(false)}
+      const processNoteHash=processNote?await hashText(processNote):null;
+      const creatorClaim={
+        title,creatorName,workType,fileName:fileName||undefined,assetHash,
+        contributionTypes:contributions as any,aiUsed,
+        primaryTool:primaryTool||null,processNoteHash,
+        creatorPublicKey:publicKey,parentRecordId:null,issuedAt:new Date().toISOString()
+      };
+      const signed=await signCanonicalWithCreatorKey(creatorClaim,keyPassphrase);
+      const response=await fetch("/api/records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({creatorClaim,creatorSignature:signed.signature,processNote:processNote||undefined})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||"Unable to create record.");setRecord(data);setKeyPassphrase("");
+    }catch(e:any){setError(e.message||"Unable to create record.")}finally{setCreating(false)}
   }
 
   async function hashText(text:string){
@@ -109,7 +89,7 @@ export default function CreatePage() {
 
   if(!user) return <main className="pageShell"><Nav/><section className="pageHead shell">
     <p className="eyebrow">HPS CREATOR STUDIO</p><h1>Sign in to create provenance.</h1>
-    <p>HPS 0.4 associates records with an authenticated creator account.</p>
+    <p>HPS 1.0 associates records with an authenticated creator identity and a canonical creator signature.</p>
     <Link className="button primary" href="/login">Sign in</Link>
   </section></main>;
 

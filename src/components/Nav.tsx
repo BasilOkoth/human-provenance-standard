@@ -10,7 +10,7 @@ export default function Nav() {
       <div className="navLinks">
         <Link href="/create">Create</Link>
         <Link href="/verify">Verify</Link>
-        <Link href="/records">Registry</Link>
+        <Link href="/records">Registry</Link><Link href="/institutional">Institutional</Link>
         <Link href="/docs">Standard</Link>
         <Link href="/developers">Developers</Link>
       </div>

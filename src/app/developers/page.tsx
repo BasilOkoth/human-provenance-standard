@@ -1,24 +1,2 @@
 import Nav from "@/components/Nav";
-export default function DevelopersPage(){return <main className="pageShell"><Nav/>
-<header className="pageHead shell"><p className="eyebrow">HPS DEVELOPER PLATFORM</p><h1>Integrate identity-aware provenance.</h1></header>
-<article className="docBody">
-<h2>Create dual-signed record</h2><pre className="codeBox">{`POST /api/records
-Authorization: Supabase session cookie
-
-{
-  "title": "Example",
-  "assetHash": "<sha256>",
-  "contributionTypes": ["concept","writing","final_approval"],
-  "creatorPublicKey": "<base64>",
-  "creatorSignature": "<base64>",
-  "unsignedPayload": "<creator-signed payload>"
-}`}</pre>
-<h2>Add attestation</h2><pre className="codeBox">{`POST /api/records/{id}/attestations
-
-{
-  "claimType": "research_supervision",
-  "statement": "I supervised the research process..."
-}`}</pre>
-<h2>Revoke</h2><pre className="codeBox">{`POST /api/records/{id}/revoke
-{ "reason": "Superseded by corrected version." }`}</pre>
-</article></main>}
+export default function DevelopersPage(){return <main className="pageShell"><Nav/><header className="pageHead shell"><p className="eyebrow">HPS DEVELOPER PLATFORM · v1.0</p><h1>Integrate verifiable trust.</h1><p>Use HPS for creator provenance, institutional issuance, exact-file verification, signed attestations and portable trust marks.</p></header><article className="docBody"><h2>Direct file verification</h2><pre className="codeBox">{`POST /api/verify/asset\n{ "assetHash": "<sha256>" }`}</pre><h2>Create creator provenance</h2><pre className="codeBox">{`POST /api/records\n\n{\n  "creatorClaim": { ...canonical claim... },\n  "creatorSignature": "<Ed25519 base64>"\n}`}</pre><h2>Institutional issuance</h2><pre className="codeBox">{`POST /api/organizations/{orgId}/issue\n\n{\n  "institutionalClaim": { ... },\n  "institutionSignature": "<Ed25519 base64>"\n}`}</pre><h2>Evidence vault</h2><pre className="codeBox">{`POST /api/records/{id}/evidence\nContent-Type: multipart/form-data\nfile=<evidence>\nvisibility=sealed`}</pre><h2>Signed attestation</h2><pre className="codeBox">{`POST /api/records/{id}/attestations\n{\n  "claimType": "research_supervision",\n  "statement": "...",\n  "attestorPublicKey": "...",\n  "attestorSignature": "...",\n  "signedPayload": "..."\n}`}</pre><h2>Portable badge</h2><pre className="codeBox">{`<a href="https://YOUR-HPS/records/HPS-...">\n  <img src="https://YOUR-HPS/api/badge/HPS-..." alt="HPS provenance" />\n</a>`}</pre><h2>Interoperability exports</h2><pre className="codeBox">{`GET /api/records/{id}/credentials\nGET /api/records/{id}/c2pa`}</pre></article></main>}

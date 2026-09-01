@@ -1,123 +1,29 @@
 "use client";
-
-import { Suspense, useState } from "react";
+import { Suspense,useState } from "react";
+import Link from "next/link";
 import Nav from "@/components/Nav";
 
-async function hashFile(file:File){
-  const digest=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
-}
-
-function shortCode(id?:string){
-  if(!id)return "";
-  const parts=id.split("-");
-  return parts[parts.length-1] || id;
-}
+async function hashFile(file:File){const digest=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("")}
+const shortCode=(id?:string)=>id?.split("-").pop()||"";
 
 function VerifyContent(){
-  const [text,setText]=useState("");
-  const [result,setResult]=useState<any>(null);
-  const [asset,setAsset]=useState<any>(null);
-
-  async function verify(){
-    try{
-      const r=await fetch("/api/verify",{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:text
-      });
-      setResult(await r.json());
-      setAsset(null);
-    }catch{
-      setResult({validSchema:false,error:"Invalid manifest."});
-    }
-  }
-
-  async function verifyAsset(file?:File){
-    if(!file||!result?.assetHash)return;
-    const actual=await hashFile(file);
-    setAsset({
-      actual,
-      matches:actual.toLowerCase()===result.assetHash.toLowerCase()
-    });
-  }
-
-  const provenanceReady =
-    Boolean(result?.validSchema) &&
-    Boolean(result?.validRegistrySignature) &&
-    Boolean(result?.creatorSignaturePresent);
-
-  const fullyVerified = provenanceReady && asset?.matches === true;
-
+  const [fileResult,setFileResult]=useState<any>(null),[busy,setBusy]=useState(false),[manifestText,setManifestText]=useState(""),[manifestResult,setManifestResult]=useState<any>(null);
+  async function verifyFile(file?:File){if(!file)return;setBusy(true);try{const assetHash=await hashFile(file);const r=await fetch("/api/verify/asset",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({assetHash})});setFileResult({...await r.json(),fileName:file.name})}finally{setBusy(false)}}
+  async function verifyManifest(){try{const r=await fetch("/api/verify",{method:"POST",headers:{"content-type":"application/json"},body:manifestText});setManifestResult(await r.json())}catch{setManifestResult({validSchema:false,error:"Invalid manifest."})}}
+  const best=fileResult?.records?.find((r:any)=>r.status==="active"&&r.validRegistrySignature&&(r.creatorSignatureValid||r.institutionSignatureValid))||fileResult?.records?.[0];
+  const bestTrusted=Boolean(best&&best.status==="active"&&best.validRegistrySignature&&(best.creatorSignatureValid||best.institutionSignatureValid));
   return <main className="pageShell"><Nav/>
-    <header className="pageHead shell">
-      <p className="eyebrow">HPS VERIFIER</p>
-      <h1>Verify provenance.</h1>
-      <p>Paste a signed HPS manifest, then upload the original file to confirm that its fingerprint matches the registered work.</p>
-    </header>
-
+    <header className="pageHead shell"><p className="eyebrow">HPS VERIFY</p><h1>Check the file in front of you.</h1><p>Upload a document, image or other digital asset. HPS calculates its SHA-256 fingerprint locally and checks for an exact registered match.</p></header>
     <section className="verifyBox">
-      <textarea
-        value={text}
-        onChange={e=>setText(e.target.value)}
-        placeholder="Paste signed HPS 0.4 manifest…"
-      />
-
-      <button className="button primary" disabled={!text.trim()} onClick={verify}>
-        Verify provenance
-      </button>
-
-      {result&&<div className="result">
-        <p className="micro">VERIFICATION RESULT</p>
-
-        <div className="verificationGrid">
-          <div><span>Schema</span><strong className={result.validSchema?"positive":"negative"}>{result.validSchema?"✓ Valid":"✕ Invalid"}</strong></div>
-          <div><span>Creator signature</span><strong className={result.creatorSignaturePresent?"positive":"negative"}>{result.creatorSignaturePresent?"✓ Present":"✕ Missing"}</strong></div>
-          <div><span>Registry signature</span><strong className={result.validRegistrySignature?"positive":"negative"}>{result.validRegistrySignature?"✓ Valid":"✕ Invalid"}</strong></div>
-          <div><span>Identity assurance</span><strong>{result.identityStatus||"unknown"}</strong></div>
-        </div>
-
-        {result.validSchema&&<div className="assetVerifier">
-          <p className="micro">ASSET RE-VERIFICATION</p>
-          <h3>Upload the original file.</h3>
-          <input type="file" onChange={e=>verifyAsset(e.target.files?.[0])}/>
-
-          {asset&&<div className={asset.matches?"assetMatch":"assetMismatch"}>
-            <strong>{asset.matches?"✓ Asset fingerprint matches":"✕ Asset fingerprint mismatch"}</strong>
-            <code>{asset.actual}</code>
-          </div>}
-        </div>}
-
-        {fullyVerified&&
-          <a
-            className="hpsCompactMark"
-            href={`/records/${result.recordId}`}
-            title="Open HPS provenance record"
-          >
-            <span className="hpsCompactLogo">HPS</span>
-            <span className="hpsCompactCheck">✓</span>
-            <span className="hpsCompactText">PROVENANCE VERIFIED</span>
-            <code>{shortCode(result.recordId)}</code>
-          </a>
-        }
-
-        {!fullyVerified && provenanceReady && asset?.matches !== false &&
-          <div className="hpsRecordFound">
-            HPS ? <code>{shortCode(result.recordId)}</code>
-          </div>
-        }
-
-        <details>
-          <summary>Technical data</summary>
-          <pre>{JSON.stringify(result,null,2)}</pre>
-        </details>
+      <div className="fileDrop"><p className="micro">DIRECT FILE VERIFICATION</p><h2>Upload the file.</h2><input type="file" onChange={e=>verifyFile(e.target.files?.[0])}/>{busy&&<p className="muted">Calculating fingerprint…</p>}</div>
+      {fileResult&&<div className="result">
+        {best?<><a className={bestTrusted?"hpsCompactMark":"hpsCompactMark hpsCompactMarkWarning"} href={`/records/${best.id}`}>
+          <span className="hpsCompactLogo">HPS</span><span className="hpsCompactCheck">{bestTrusted?"✓":"!"}</span><span className="hpsCompactText">{bestTrusted?"PROVENANCE VERIFIED":"RECORD REQUIRES ATTENTION"}</span><code>{shortCode(best.id)}</code>
+        </a><div className="verificationGrid"><div><span>Asset fingerprint</span><strong className="positive">✓ Exact match</strong></div><div><span>Registry signature</span><strong className={best.validRegistrySignature?"positive":"negative"}>{best.validRegistrySignature?"✓ Valid":"✕ Invalid"}</strong></div><div><span>Issuer/creator signature</span><strong className={(best.creatorSignatureValid||best.institutionSignatureValid)?"positive":"negative"}>{best.creatorSignatureValid||best.institutionSignatureValid?"✓ Valid":"✕ Not independently valid"}</strong></div><div><span>Status</span><strong>{best.status}</strong></div></div><Link className="button primary" href={`/records/${best.id}`}>Open provenance record</Link></>:<><h2>No HPS match found.</h2><p>This file does not currently match an asset fingerprint in the HPS registry. HPS is not claiming the file is fake; only that no matching registered record was found.</p></>}
+        <details><summary>Technical data</summary><pre>{JSON.stringify(fileResult,null,2)}</pre></details>
       </div>}
+      <details className="advancedVerify"><summary>Advanced · verify a signed manifest directly</summary><textarea value={manifestText} onChange={e=>setManifestText(e.target.value)} placeholder="Paste signed HPS manifest JSON…"/><button className="button darkButton" disabled={!manifestText.trim()} onClick={verifyManifest}>Verify manifest</button>{manifestResult&&<pre className="codeBox">{JSON.stringify(manifestResult,null,2)}</pre>}</details>
     </section>
   </main>
 }
-
-export default function VerifyPage(){
-  return <Suspense fallback={<div className="loading">Loading verifier…</div>}>
-    <VerifyContent/>
-  </Suspense>
-}
+export default function VerifyPage(){return <Suspense fallback={<div className="loading">Loading verifier…</div>}><VerifyContent/></Suspense>}

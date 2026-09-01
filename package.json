@@ -1,9 +1,11 @@
 {
   "name": "human-provenance-standard",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Human Provenance Standard (HPS) — identity-aware, dual-signed provenance and attestation infrastructure.",
-  "engines": { "node": ">=22" },
+  "description": "Human Provenance Standard (HPS) \u2014 open provenance, institutional issuance, document integrity, evidence and interoperability infrastructure.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
