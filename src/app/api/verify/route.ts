@@ -10,6 +10,8 @@ export async function POST(request:NextRequest){
 
     return NextResponse.json({
       validSchema:true,
+      recordId:m.id,
+      workTitle:m.work.title,
       validRegistrySignature:verifyRegistrySignature(m),
       creatorSignaturePresent:Boolean(m.creatorSignature),
       identityStatus:m.actors[0]?.identityAssurance||"unknown",
