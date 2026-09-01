@@ -1,4 +1,4 @@
-
+"use client";
 
 import nacl from "tweetnacl";
 import * as util from "tweetnacl-util";
@@ -79,15 +79,22 @@ export async function signIssuerClaim(
   passphrase: string
 ) {
   const raw = localStorage.getItem(keyName(orgId));
-  if (!raw) throw new Error("No issuer key on this device.");
+
+  if (!raw) {
+    throw new Error("No issuer key on this device.");
+  }
 
   const v = JSON.parse(raw);
   const key = await derive(passphrase, util.decodeBase64(v.salt));
 
   let secret: ArrayBuffer;
+
   try {
     secret = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: toArrayBuffer(util.decodeBase64(v.iv)) },
+      {
+        name: "AES-GCM",
+        iv: toArrayBuffer(util.decodeBase64(v.iv)),
+      },
       key,
       toArrayBuffer(util.decodeBase64(v.encryptedSecret))
     );
@@ -102,3 +109,6 @@ export async function signIssuerClaim(
 
   return {
     publicKey: v.publicKey as string,
+    signature: util.encodeBase64(sig),
+  };
+}
