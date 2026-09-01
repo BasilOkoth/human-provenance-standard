@@ -49,7 +49,7 @@ export default async function RecordPage({params}:{params:Promise<{id:string}>})
       <dl className="recordFacts">
         <div><dt>Creator</dt><dd>{data.creator_name}</dd></div>
         <div><dt>Human contribution</dt><dd>{human||"None declared"}</dd></div>
-        <div><dt>AI-assisted contribution</dt><dd>{assisted||"None declared"}</dd></div>
+        <div><dt>Human contribution with AI assistance</dt><dd>{assisted||"None declared"}</dd></div>
         <div><dt>Asset SHA-256</dt><dd><code>{data.asset_hash}</code></dd></div>
         <div><dt>Status</dt><dd>{data.status}</dd></div>
       </dl>
