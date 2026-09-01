@@ -1,167 +1,48 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import Nav from "@/components/Nav";
 
-function VerifyContent() {
-  const params = useSearchParams();
-  const [text, setText] = useState("");
-  const [result, setResult] = useState<any>(null);
-
-  useEffect(() => {
-    const demo = params.get("demo");
-    if (demo) {
-      setText(demo);
-    }
-  }, [params]);
-
-  async function verify() {
-    try {
-      const data = JSON.parse(text);
-
-      const response = await fetch("/api/verify", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(data)
-      });
-
-      setResult(await response.json());
-    } catch {
-      setResult({
-        validSchema: false,
-        validSignature: false,
-        error: "The input is not valid HPS JSON."
-      });
-    }
-  }
-
-  function clear() {
-    setText("");
-    setResult(null);
-  }
-
-  return (
-    <main className="pageShell">
-      <Nav />
-
-      <header className="pageHead shell">
-        <p className="eyebrow">HPS VERIFIER</p>
-        <h1>Inspect the provenance.</h1>
-
-        <p>
-          Paste an HPS manifest below. The verifier examines structure,
-          contribution declarations, evidence, identity assurance and
-          cryptographic signature status.
-        </p>
-      </header>
-
-      <section className="verifyBox">
-        <label className="micro">HPS MANIFEST</label>
-
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={`{
-  "hpsVersion": "0.1",
-  "id": "HPS-..."
-}`}
-        />
-
-        <div className="actions">
-          <button
-            className="button primary"
-            onClick={verify}
-            disabled={!text.trim()}
-          >
-            Verify record
-          </button>
-
-          <button
-            className="button ghost"
-            onClick={clear}
-            disabled={!text && !result}
-          >
-            Clear
-          </button>
-        </div>
-
-        {result && (
-          <div className="result">
-            <p className="micro">VERIFICATION RESULT</p>
-
-            <h2 className={result.validSchema ? "success" : "error"}>
-              {result.validSchema
-                ? "✓ Manifest structure valid"
-                : "✕ Verification failed"}
-            </h2>
-
-            {result.validSchema && (
-              <div className="verificationGrid">
-                <div>
-                  <span>Schema</span>
-                  <strong>✓ Valid</strong>
-                </div>
-
-                <div>
-                  <span>Signature</span>
-                  <strong>
-                    {result.validSignature
-                      ? "✓ Valid"
-                      : "Not signed / not verified"}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>Identity assurance</span>
-                  <strong>{result.identityStatus ?? "Unknown"}</strong>
-                </div>
-
-                <div>
-                  <span>Human contributions</span>
-                  <strong>{result.contributions?.human ?? 0}</strong>
-                </div>
-
-                <div>
-                  <span>AI-assisted contributions</span>
-                  <strong>{result.contributions?.aiAssisted ?? 0}</strong>
-                </div>
-
-                <div>
-                  <span>Automated contributions</span>
-                  <strong>{result.contributions?.automated ?? 0}</strong>
-                </div>
-              </div>
-            )}
-
-            <details>
-              <summary>Technical verification data</summary>
-              <pre>{JSON.stringify(result, null, 2)}</pre>
-            </details>
-          </div>
-        )}
-      </section>
-    </main>
-  );
+async function hashFile(file:File){
+  const digest=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-export default function VerifyPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="pageShell">
-          <Nav />
+function VerifyContent(){
+  const [text,setText]=useState("");const [result,setResult]=useState<any>(null);const [asset,setAsset]=useState<any>(null);
 
-          <section className="pageHead shell">
-            <p className="eyebrow">HPS VERIFIER</p>
-            <h1>Loading verifier…</h1>
-          </section>
-        </main>
-      }
-    >
-      <VerifyContent />
-    </Suspense>
-  );
-            }
+  async function verify(){
+    try{
+      const r=await fetch("/api/verify",{method:"POST",headers:{"content-type":"application/json"},body:text});
+      setResult(await r.json());setAsset(null)
+    }catch{setResult({validSchema:false,error:"Invalid manifest."})}
+  }
+  async function verifyAsset(file?:File){
+    if(!file||!result?.assetHash)return;
+    const actual=await hashFile(file);
+    setAsset({actual,matches:actual.toLowerCase()===result.assetHash.toLowerCase()})
+  }
+
+  return <main className="pageShell"><Nav/>
+    <header className="pageHead shell"><p className="eyebrow">HPS VERIFIER</p><h1>Inspect every trust layer.</h1>
+      <p>HPS does not collapse provenance into one score. Verify the manifest, registry countersignature, identity assurance and asset fingerprint separately.</p></header>
+    <section className="verifyBox"><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Paste signed HPS 0.4 manifest…"/>
+      <button className="button primary" disabled={!text.trim()} onClick={verify}>Verify provenance</button>
+      {result&&<div className="result"><p className="micro">VERIFICATION RESULT</p>
+        <div className="verificationGrid">
+          <div><span>Schema</span><strong className={result.validSchema?"positive":"negative"}>{result.validSchema?"✓ Valid":"✕ Invalid"}</strong></div>
+          <div><span>Creator signature</span><strong className={result.creatorSignaturePresent?"positive":"negative"}>{result.creatorSignaturePresent?"✓ Present":"✕ Missing"}</strong></div>
+          <div><span>Registry signature</span><strong className={result.validRegistrySignature?"positive":"negative"}>{result.validRegistrySignature?"✓ Valid":"✕ Invalid"}</strong></div>
+          <div><span>Identity assurance</span><strong>{result.identityStatus||"unknown"}</strong></div>
+        </div>
+        {result.validSchema&&<div className="assetVerifier"><p className="micro">ASSET RE-VERIFICATION</p><h3>Verify the original file.</h3>
+          <input type="file" onChange={e=>verifyAsset(e.target.files?.[0])}/>
+          {asset&&<div className={asset.matches?"assetMatch":"assetMismatch"}><strong>{asset.matches?"✓ Asset fingerprint matches":"✕ Asset fingerprint mismatch"}</strong><code>{asset.actual}</code></div>}
+        </div>}
+        <details><summary>Technical data</summary><pre>{JSON.stringify(result,null,2)}</pre></details>
+      </div>}
+    </section>
+  </main>
+}
+
+export default function VerifyPage(){return <Suspense fallback={<div className="loading">Loading verifier…</div>}><VerifyContent/></Suspense>}

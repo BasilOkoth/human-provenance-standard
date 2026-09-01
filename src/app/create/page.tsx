@@ -1,80 +1,174 @@
 "use client";
-import {useMemo,useState} from "react";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Nav from "@/components/Nav";
+import { createBrowserSupabase } from "@/lib/supabase/browser";
+import { getStoredPublicKey, signWithCreatorKey } from "@/lib/hps/keyvault";
 
-const options=["concept","research","reasoning","writing","composition","algorithm_design","coding","editing","selection","curation","parameter_design","data_collection","analysis","fact_checking","testing","final_approval"];
-function makeId(){return `HPS-${new Date().getFullYear()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`}
-async function hashFile(file:File){
-  const digest=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("")
+const contributionOptions = [
+  "concept","research","reasoning","writing","composition","algorithm_design",
+  "coding","editing","selection","curation","parameter_design","data_collection",
+  "analysis","fact_checking","testing","final_approval"
+];
+
+async function hashFile(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2,"0")).join("");
 }
 
-export default function Create(){
-  const [recordId]=useState(makeId());
-  const [title,setTitle]=useState(""); const [creator,setCreator]=useState("");
-  const [workType,setWorkType]=useState("document"); const [hash,setHash]=useState("");
-  const [fileName,setFileName]=useState(""); const [selected,setSelected]=useState<string[]>(["concept","final_approval"]);
-  const [aiUsed,setAiUsed]=useState("no"); const [tool,setTool]=useState(""); const [note,setNote]=useState("");
-  const [manifest,setManifest]=useState<any>(null);
-  const canCreate=useMemo(()=>title&&creator&&hash&&selected.length>0,[title,creator,hash,selected]);
+export default function CreatePage() {
+  const supabase = createBrowserSupabase();
+  const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [publicKey, setPublicKey] = useState<string|null>(null);
+  const [title,setTitle]=useState("");
+  const [creatorName,setCreatorName]=useState("");
+  const [workType,setWorkType]=useState("document");
+  const [fileName,setFileName]=useState("");
+  const [assetHash,setAssetHash]=useState("");
+  const [contributions,setContributions]=useState<string[]>(["concept","final_approval"]);
+  const [aiUsed,setAiUsed]=useState(false);
+  const [primaryTool,setPrimaryTool]=useState("");
+  const [processNote,setProcessNote]=useState("");
+  const [keyPassphrase,setKeyPassphrase]=useState("");
+  const [creating,setCreating]=useState(false);
+  const [record,setRecord]=useState<any>(null);
+  const [error,setError]=useState("");
 
-  async function onFile(f?:File){if(!f)return;setFileName(f.name);setHash(await hashFile(f))}
-  function toggle(v:string){setSelected(s=>s.includes(v)?s.filter(x=>x!==v):[...s,v])}
-  function create(){
-    const now=new Date().toISOString();
-    setManifest({
-      hpsVersion:"0.1",id:recordId,
-      work:{title,type:workType,createdAt:now,version:"1.0",sha256:hash,fileName},
-      actors:[{id:"creator",name:creator,role:"creator",identityAssurance:"self_declared"}],
-      contributions:selected.map(type=>({
-        actorId:"creator",type,
-        origin:type==="final_approval"?"human":aiUsed==="yes"?"ai_assisted":"human",
-        description:`${creator} declares responsibility for ${type.replaceAll("_"," ")} in this work.`,
-        evidenceIds:[],confidence:note?"evidence_backed":"self_declared"
-      })),
-      tools:tool?[{name:tool,role:"creation assistance",generativeAI:aiUsed==="yes",humanOversight:"high"}]:[],
-      evidence:note?[{id:"evidence-note-1",type:"other",visibility:"public",sha256:"0".repeat(64),note}]:[],
-      responsibility:{finalApprovalActorId:"creator",statement:"I confirm that this provenance record accurately describes my contribution and I accept responsibility for the final work."},
-      issuedAt:now
-    })
+  useEffect(()=>{(async()=>{
+    const {data}=await supabase.auth.getUser();
+    setUser(data.user);
+    if(data.user){
+      const r=await supabase.from("hps_profiles").select("*").eq("user_id",data.user.id).single();
+      setProfile(r.data);
+      setCreatorName(r.data?.display_name || data.user.email || "");
+    }
+    setPublicKey(getStoredPublicKey());
+  })()},[]);
+
+  const ready = useMemo(()=>Boolean(
+    user && publicKey && title && creatorName && assetHash &&
+    contributions.length && keyPassphrase
+  ),[user,publicKey,title,creatorName,assetHash,contributions,keyPassphrase]);
+
+  function toggle(v:string){setContributions(c=>c.includes(v)?c.filter(x=>x!==v):[...c,v])}
+  async function onFile(file?:File){if(!file)return;setFileName(file.name);setAssetHash(await hashFile(file))}
+
+  async function createRecord(){
+    setError(""); setCreating(true); setRecord(null);
+
+    try{
+      const {data:userData}=await supabase.auth.getUser();
+      if(!userData.user) throw new Error("Please sign in first.");
+      if(!publicKey) throw new Error("Create your HPS creator signing key in Account first.");
+
+      const unsignedPayload = JSON.stringify({
+        title, creatorName, workType, fileName, assetHash,
+        contributionTypes:contributions, aiUsed,
+        primaryTool:primaryTool||null,
+        processNoteHash: processNote ? await hashText(processNote) : null,
+        creatorPublicKey: publicKey
+      });
+
+      const signed = await signWithCreatorKey(unsignedPayload,keyPassphrase);
+
+      const response=await fetch("/api/records",{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({
+          title,creatorName,workType,fileName,assetHash,
+          contributionTypes:contributions,aiUsed,
+          primaryTool:primaryTool||undefined,
+          processNote:processNote||undefined,
+          creatorPublicKey:signed.publicKey,
+          creatorSignature:signed.signature,
+          unsignedPayload
+        })
+      });
+
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.error||"Unable to create record.");
+      setRecord(data); setKeyPassphrase("");
+    }catch(e:any){setError(e.message||"Unable to create record.")}
+    finally{setCreating(false)}
   }
-  function download(){
-    const blob=new Blob([JSON.stringify(manifest,null,2)],{type:"application/json"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${recordId}.hps.json`;a.click()
+
+  async function hashText(text:string){
+    const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
   }
+
+  function downloadManifest(){
+    if(!record?.manifest)return;
+    const blob=new Blob([JSON.stringify(record.manifest,null,2)],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+    a.download=`${record.id}.hps.json`;a.click();URL.revokeObjectURL(a.href)
+  }
+
+  if(!user) return <main className="pageShell"><Nav/><section className="pageHead shell">
+    <p className="eyebrow">HPS CREATOR STUDIO</p><h1>Sign in to create provenance.</h1>
+    <p>HPS 0.4 associates records with an authenticated creator account.</p>
+    <Link className="button primary" href="/login">Sign in</Link>
+  </section></main>;
+
+  if(!publicKey) return <main className="pageShell"><Nav/><section className="pageHead shell">
+    <p className="eyebrow">HPS CREATOR STUDIO</p><h1>Create your signing identity first.</h1>
+    <p>Your creator-held key cryptographically signs your provenance declaration before HPS countersigns it.</p>
+    <Link className="button primary" href="/account">Set up creator key</Link>
+  </section></main>;
 
   return <main className="pageShell"><Nav/>
-    <header className="pageHead shell"><p className="eyebrow">HPS CREATOR STUDIO</p><h1>Create a provenance record.</h1><p>Fingerprint the work locally, describe your contribution, disclose tool use and generate a portable HPS manifest.</p></header>
+    <header className="pageHead shell"><p className="eyebrow">HPS CREATOR STUDIO · DUAL SIGNATURE</p>
+      <h1>Sign your contribution.</h1>
+      <p>You sign first with your encrypted creator key. HPS verifies your signature before creating a registry countersignature.</p>
+    </header>
+
     <section className="panel">
-      <div className="notice">Your source file is hashed inside your browser. This prototype does not upload the source file.</div>
-      <div className="formGrid">
-        <div className="sectionLabel">01 · Identify the work</div>
-        <div className="field"><label>Work title</label><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Nebula I — Emergence"/></div>
-        <div className="field"><label>Creator name</label><input value={creator} onChange={e=>setCreator(e.target.value)} placeholder="Your name or pseudonym"/></div>
-        <div className="field"><label>Work type</label><select value={workType} onChange={e=>setWorkType(e.target.value)}><option>document</option><option>computational_art</option><option>software</option><option>research</option><option>photograph</option><option>design</option><option>video</option><option>other</option></select></div>
-        <div className="field"><label>Source file</label><input type="file" onChange={e=>onFile(e.target.files?.[0])}/></div>
-        {hash&&<div className="hashBox"><b>SHA-256</b><br/>{hash}</div>}
-
-        <div className="sectionLabel">02 · Human contribution</div>
-        <div className="checks">{options.map(v=><label className="check" key={v}><input type="checkbox" checked={selected.includes(v)} onChange={()=>toggle(v)}/>{v.replaceAll("_"," ")}</label>)}</div>
-
-        <div className="sectionLabel">03 · Tools & AI disclosure</div>
-        <div className="field"><label>Generative AI used?</label><select value={aiUsed} onChange={e=>setAiUsed(e.target.value)}><option value="no">No</option><option value="yes">Yes — disclosed</option></select></div>
-        <div className="field"><label>Primary tool</label><input value={tool} onChange={e=>setTool(e.target.value)} placeholder="Python, ChatGPT, Photoshop, Figma…"/></div>
-        <div className="field full"><label>Process evidence / note</label><textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Describe drafts, commits, renders, notebooks, recordings or other evidence."/></div>
-
-        <div className="sectionLabel">04 · Responsibility</div>
-        <div className="field full"><button className="button primary" disabled={!canCreate} onClick={create}>Generate HPS manifest</button></div>
+      <div className="identityBanner">
+        <div><span>IDENTITY</span><strong>{profile?.identity_assurance || "account_verified"}</strong></div>
+        <div><span>CREATOR KEY</span><strong className="positive">✓ Present on device</strong></div>
       </div>
 
-      {manifest&&<div className="result">
-        <p className="micro">RECORD CREATED · {recordId}</p><h2>{manifest.work.title}</h2>
-        <pre>{JSON.stringify(manifest,null,2)}</pre>
-        <div className="actions">
-          <button className="button primary" onClick={download}>Download .hps.json</button>
-          <Link className="button ghost" href={`/verify?demo=${encodeURIComponent(JSON.stringify(manifest))}`}>Verify manifest</Link>
+      <div className="formGrid">
+        <div className="sectionLabel">01 · Work</div>
+        <div className="field"><label>Title</label><input value={title} onChange={e=>setTitle(e.target.value)}/></div>
+        <div className="field"><label>Creator</label><input value={creatorName} onChange={e=>setCreatorName(e.target.value)}/></div>
+        <div className="field"><label>Type</label><select value={workType} onChange={e=>setWorkType(e.target.value)}>
+          <option value="document">Document</option><option value="computational_art">Computational art</option>
+          <option value="software">Software</option><option value="research">Research</option>
+          <option value="photograph">Photograph</option><option value="design">Design</option>
+          <option value="video">Video</option><option value="other">Other</option></select></div>
+        <div className="field"><label>Original file</label><input type="file" onChange={e=>onFile(e.target.files?.[0])}/></div>
+        {assetHash&&<div className="hashBox"><span>ASSET SHA-256</span><code>{assetHash}</code></div>}
+
+        <div className="sectionLabel">02 · Human contribution</div>
+        <div className="checks">{contributionOptions.map(v=><label className="check" key={v}>
+          <input type="checkbox" checked={contributions.includes(v)} onChange={()=>toggle(v)}/>{v.replaceAll("_"," ")}</label>)}</div>
+
+        <div className="sectionLabel">03 · Tools & evidence</div>
+        <div className="field"><label>Generative AI used?</label><select value={aiUsed?"yes":"no"} onChange={e=>setAiUsed(e.target.value==="yes")}>
+          <option value="no">No</option><option value="yes">Yes — disclose assistance</option></select></div>
+        <div className="field"><label>Primary tool</label><input value={primaryTool} onChange={e=>setPrimaryTool(e.target.value)} placeholder="Python, ChatGPT, Photoshop…"/></div>
+        <div className="field full"><label>Process evidence / note</label><textarea value={processNote} onChange={e=>setProcessNote(e.target.value)}/></div>
+
+        <div className="sectionLabel">04 · Creator signature</div>
+        <div className="field full"><label>Creator-key passphrase</label><input type="password" value={keyPassphrase} onChange={e=>setKeyPassphrase(e.target.value)} placeholder="Used only locally to unlock your encrypted signing key"/></div>
+        <div className="field full"><button className="button primary" disabled={!ready||creating} onClick={createRecord}>
+          {creating?"Verifying signature & countersigning…":"Sign & register HPS record"}</button></div>
+      </div>
+
+      {error&&<div className="errorBox">{error}</div>}
+      {record&&<div className="successPanel"><p className="micro">DUAL-SIGNED & REGISTERED</p><h2>{record.id}</h2>
+        <div className="verificationGrid">
+          <div><span>Creator signature</span><strong className="positive">✓ Verified</strong></div>
+          <div><span>Registry signature</span><strong className="positive">✓ Countersigned</strong></div>
+          <div><span>Identity assurance</span><strong>{record.identityAssurance}</strong></div>
+          <div><span>Asset fingerprint</span><strong className="positive">✓ Recorded</strong></div>
         </div>
+        <div className="actions"><Link className="button primary" href={`/records/${record.id}`}>Open record</Link>
+          <button className="button darkButton" onClick={downloadManifest}>Download manifest</button></div>
       </div>}
     </section>
   </main>

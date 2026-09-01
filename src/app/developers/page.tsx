@@ -1,14 +1,24 @@
 import Nav from "@/components/Nav";
-export default function Developers(){
- const example=`POST /api/verify
-Content-Type: application/json
+export default function DevelopersPage(){return <main className="pageShell"><Nav/>
+<header className="pageHead shell"><p className="eyebrow">HPS DEVELOPER PLATFORM</p><h1>Integrate identity-aware provenance.</h1></header>
+<article className="docBody">
+<h2>Create dual-signed record</h2><pre className="codeBox">{`POST /api/records
+Authorization: Supabase session cookie
 
 {
-  "hpsVersion":"0.1",
-  "id":"HPS-...",
-  "work":{...},
-  "actors":[...],
-  "contributions":[...]
-}`;
- return <main className="pageShell"><Nav/><header className="pageHead shell"><p className="eyebrow">HPS FOR DEVELOPERS</p><h1>Build provenance into products.</h1><p>Use the manifest vocabulary and verifier API to integrate HPS into creator tools, academic systems, media workflows and software platforms.</p></header><article className="docBody"><h2>Verify API</h2><pre className="codeBox">{example}</pre><h2>Design rule</h2><p>Do not collapse HPS trust signals into a single authenticity percentage. Schema integrity, signer validity, identity assurance and evidence strength are separate facts.</p></article></main>
-}
+  "title": "Example",
+  "assetHash": "<sha256>",
+  "contributionTypes": ["concept","writing","final_approval"],
+  "creatorPublicKey": "<base64>",
+  "creatorSignature": "<base64>",
+  "unsignedPayload": "<creator-signed payload>"
+}`}</pre>
+<h2>Add attestation</h2><pre className="codeBox">{`POST /api/records/{id}/attestations
+
+{
+  "claimType": "research_supervision",
+  "statement": "I supervised the research process..."
+}`}</pre>
+<h2>Revoke</h2><pre className="codeBox">{`POST /api/records/{id}/revoke
+{ "reason": "Superseded by corrected version." }`}</pre>
+</article></main>}

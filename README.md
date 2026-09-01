@@ -1,37 +1,80 @@
-# Human Provenance Standard (HPS)
+# Human Provenance Standard — HPS 0.4 Identity & Attestation
 
-> **Proof of human contribution in an AI-assisted world.**
+> **Provenance with identity and agency.**
 
-HPS is an experimental open standard for declaring, evidencing and verifying meaningful human contribution to digital and physical work.
+HPS 0.4 upgrades the reference implementation from registry-only signing to a dual-signature trust model.
 
-## Premium prototype includes
-- Creator Studio
-- browser-local SHA-256 file fingerprinting
-- portable `.hps.json` manifests
-- AI/tool disclosure
-- contribution vocabulary
-- verification API
-- demo provenance registry
-- public record pages
-- developer documentation
-- standards page
-- Render deployment config
+## New in 0.4
 
-## Run
+- Supabase authentication
+- email magic-link login
+- GitHub OAuth support
+- creator profiles
+- creator-held Ed25519 signing keys
+- PBKDF2 + AES-GCM encrypted key vault in the browser
+- creator signature verification
+- HPS Registry countersignature
+- account-level identity assurance
+- institutional assurance field
+- third-party attestations
+- record version lineage
+- revocation without history erasure
+- public QR provenance pages
+- local SHA-256 asset verification
+
+## Trust stack
+
+1. Asset fingerprint
+2. Creator key signature
+3. Registry countersignature
+4. Identity assurance
+5. Evidence
+6. Independent attestations
+7. Version/revocation history
+
+## Setup
+
+Run:
+
 ```bash
 npm install
-npm run dev
 ```
 
-## Render
-Build:
+Create a Supabase project and run:
+
+```text
+supabase/schema.sql
+```
+
+Generate registry keys:
+
 ```bash
-npm install && npm run build
+npm run registry:keygen
 ```
 
-Start:
-```bash
-npm start
+Add `.env.local`:
+
+```env
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+HPS_REGISTRY_PUBLIC_KEY=YOUR_REGISTRY_PUBLIC_KEY
+HPS_REGISTRY_SECRET_KEY=YOUR_REGISTRY_SECRET_KEY
 ```
 
-HPS 0.1 is experimental and is not yet an accredited international standard.
+## GitHub OAuth
+
+In Supabase Authentication → Providers → GitHub:
+
+1. Enable GitHub.
+2. Create a GitHub OAuth App.
+3. Use the callback URL shown by Supabase.
+4. Add the OAuth client ID and secret in Supabase.
+5. Add your Render URL under Authentication → URL Configuration.
+
+## Security note
+
+The browser reference key vault encrypts the creator secret key with a passphrase-derived AES-GCM key. This is a strong prototype architecture but not equivalent to hardware-backed key custody. High-assurance institutional deployments should support passkeys, WebAuthn, HSMs, or managed signing services.
+
+HPS remains an experimental open draft and is not an accredited international standard.
