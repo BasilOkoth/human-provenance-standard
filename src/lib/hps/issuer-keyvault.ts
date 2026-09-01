@@ -4,25 +4,26 @@ import nacl from "tweetnacl";
 import * as util from "tweetnacl-util";
 import { jcsCanonicalize } from "./canonical";
 
-const keyName = (orgId: string) => `hps_issuer_key_${orgId}`;
+const KEY_STORAGE = "hps_creator_key_v1";
 
-/**
- * Web Crypto's BufferSource types in newer TypeScript/Next.js versions
- * require an ArrayBuffer-backed view rather than ArrayBufferLike.
- * Copying bytes into a fresh Uint8Array guarantees a real ArrayBuffer.
- */
+function bytesToBase64(bytes: Uint8Array) {
+  return util.encodeBase64(bytes);
+}
+
+function base64ToBytes(value: string) {
+  return util.decodeBase64(value);
+}
+
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
 }
 
-async function derive(passphrase: string, salt: Uint8Array) {
-  const passphraseBytes = new TextEncoder().encode(passphrase);
-
+async function deriveKey(passphrase: string, salt: Uint8Array) {
   const material = await crypto.subtle.importKey(
     "raw",
-    toArrayBuffer(passphraseBytes),
+    toArrayBuffer(new TextEncoder().encode(passphrase)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -32,105 +33,92 @@ async function derive(passphrase: string, salt: Uint8Array) {
     {
       name: "PBKDF2",
       salt: toArrayBuffer(salt),
-      iterations: 300000,
-      hash: "SHA-256",
+      iterations: 250000,
+      hash: "SHA-256"
     },
     material,
-    {
-      name: "AES-GCM",
-      length: 256,
-    },
+    { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
 }
 
-export async function createIssuerKey(
-  orgId: string,
-  passphrase: string
-) {
+export async function createEncryptedCreatorKey(passphrase: string) {
   const pair = nacl.sign.keyPair();
-
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await derive(passphrase, salt);
+  const aesKey = await deriveKey(passphrase, salt);
 
   const encrypted = await crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: toArrayBuffer(iv),
-    },
-    key,
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    aesKey,
     toArrayBuffer(pair.secretKey)
   );
 
   const vault = {
     version: 1,
-    publicKey: util.encodeBase64(pair.publicKey),
-    salt: util.encodeBase64(salt),
-    iv: util.encodeBase64(iv),
-    encryptedSecret: util.encodeBase64(new Uint8Array(encrypted)),
+    publicKey: bytesToBase64(pair.publicKey),
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    encryptedSecret: bytesToBase64(new Uint8Array(encrypted))
   };
 
-  localStorage.setItem(keyName(orgId), JSON.stringify(vault));
-
+  localStorage.setItem(KEY_STORAGE, JSON.stringify(vault));
   return vault.publicKey;
 }
 
-export function getIssuerPublicKey(orgId: string) {
+export function getStoredPublicKey(): string | null {
   try {
-    return (
-      JSON.parse(localStorage.getItem(keyName(orgId)) || "null")
-        ?.publicKey || null
-    );
+    const raw = localStorage.getItem(KEY_STORAGE);
+    if (!raw) return null;
+    return JSON.parse(raw).publicKey ?? null;
   } catch {
     return null;
   }
 }
 
-export async function signIssuerClaim(
-  orgId: string,
-  value: unknown,
-  passphrase: string
-) {
-  const raw = localStorage.getItem(keyName(orgId));
+export async function signWithCreatorKey(message: string, passphrase: string) {
+  const raw = localStorage.getItem(KEY_STORAGE);
+  if (!raw) throw new Error("No creator signing key found on this device.");
 
-  if (!raw) {
-    throw new Error("No issuer key on this device.");
-  }
+  const vault = JSON.parse(raw);
+  const aesKey = await deriveKey(passphrase, base64ToBytes(vault.salt));
 
-  const v = JSON.parse(raw);
-
-  const salt = util.decodeBase64(v.salt);
-  const iv = util.decodeBase64(v.iv);
-  const encryptedSecret = util.decodeBase64(v.encryptedSecret);
-
-  const key = await derive(passphrase, salt);
-
-  let secret: ArrayBuffer;
-
+  let decrypted: ArrayBuffer;
   try {
-    secret = await crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: toArrayBuffer(iv),
-      },
-      key,
-      toArrayBuffer(encryptedSecret)
+    decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: toArrayBuffer(base64ToBytes(vault.iv)) },
+      aesKey,
+      toArrayBuffer(base64ToBytes(vault.encryptedSecret))
     );
   } catch {
-    throw new Error("Incorrect issuer-key passphrase.");
+    throw new Error("Incorrect creator-key passphrase.");
   }
 
-  const message = util.decodeUTF8(jcsCanonicalize(value));
-
-  const sig = nacl.sign.detached(
-    message,
-    new Uint8Array(secret)
+  const signature = nacl.sign.detached(
+    util.decodeUTF8(message),
+    new Uint8Array(decrypted)
   );
 
   return {
-    publicKey: v.publicKey as string,
-    signature: util.encodeBase64(sig),
+    publicKey: vault.publicKey as string,
+    signature: util.encodeBase64(signature)
   };
+}
+
+export async function signCanonicalWithCreatorKey(value: unknown, passphrase: string) {
+  return signWithCreatorKey(jcsCanonicalize(value), passphrase);
+}
+
+export function exportEncryptedKeyFile() {
+  const raw = localStorage.getItem(KEY_STORAGE);
+  if (!raw) throw new Error("No creator key exists on this device.");
+  return raw;
+}
+
+export function importEncryptedKeyFile(raw: string) {
+  const parsed = JSON.parse(raw);
+  if (!parsed.publicKey || !parsed.encryptedSecret) throw new Error("Invalid HPS key file.");
+  localStorage.setItem(KEY_STORAGE, JSON.stringify(parsed));
+  return parsed.publicKey as string;
 }
