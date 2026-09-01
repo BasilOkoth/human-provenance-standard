@@ -1,0 +1,87 @@
+{
+  "hpsVersion": "0.1",
+  "id": "hps:2026:ke:elimara:nb01:0001",
+  "work": {
+    "title": "Nebula I — Emergence",
+    "type": "computational_art",
+    "createdAt": "2026-08-29T10:00:00.000Z",
+    "version": "1.0",
+    "sha256": "4e9a0f9ef6a0473b81c1fcb02f8da8243449a20745bc7dcb0b59f8785a3e1331"
+  },
+  "actors": [
+    {
+      "id": "creator",
+      "name": "Basil Okoth Kaudo",
+      "role": "creator",
+      "identityAssurance": "self_declared"
+    }
+  ],
+  "contributions": [
+    {
+      "actorId": "creator",
+      "type": "concept",
+      "origin": "human",
+      "description": "Developed the artistic concept and visual direction.",
+      "evidenceIds": [
+        "ev1"
+      ],
+      "confidence": "evidence_backed"
+    },
+    {
+      "actorId": "creator",
+      "type": "algorithm_design",
+      "origin": "human",
+      "description": "Designed the computational logic and parameter space.",
+      "evidenceIds": [
+        "ev2"
+      ],
+      "confidence": "evidence_backed"
+    },
+    {
+      "actorId": "creator",
+      "type": "selection",
+      "origin": "human",
+      "description": "Selected and approved the final composition.",
+      "evidenceIds": [
+        "ev1"
+      ],
+      "confidence": "evidence_backed"
+    },
+    {
+      "actorId": "creator",
+      "type": "final_approval",
+      "origin": "human",
+      "description": "Accepted final responsibility for the work.",
+      "evidenceIds": [],
+      "confidence": "self_declared"
+    }
+  ],
+  "tools": [
+    {
+      "name": "Python",
+      "role": "computational rendering",
+      "generativeAI": false,
+      "scope": "Executed the artist-defined algorithm.",
+      "humanOversight": "high"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev1",
+      "type": "render",
+      "visibility": "hashed",
+      "sha256": "bc6c9e4f1f51dce4db7a8c2e701e3c470a982232475b8448c4d8f0c50f49d53d"
+    },
+    {
+      "id": "ev2",
+      "type": "source_code",
+      "visibility": "hashed",
+      "sha256": "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090"
+    }
+  ],
+  "responsibility": {
+    "finalApprovalActorId": "creator",
+    "statement": "I accept responsibility for the final work and the accuracy of this provenance declaration."
+  },
+  "issuedAt": "2026-09-01T12:00:00.000Z"
+}

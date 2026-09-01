@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hps.dev/schema/0.1/manifest.json",
+  "title": "Human Provenance Standard Manifest",
+  "type": "object",
+  "required": [
+    "hpsVersion",
+    "id",
+    "work",
+    "actors",
+    "contributions",
+    "responsibility",
+    "issuedAt"
+  ]
+}
