@@ -1,61 +1,175 @@
-import Link from "next/link";
+"use client";
+
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Nav from "@/components/Nav";
 
-const pillars=[
-  ["Human contribution","Make meaningful human work visible without pretending AI does not exist."],
-  ["Evidence","Back authorship claims with hashes, drafts, commits, renders and attestations."],
-  ["Integrity","Bind a record to the exact work using cryptographic fingerprints."],
-  ["Responsibility","Show who stands behind the final output and accepts responsibility for it."]
-];
+function VerifyContent() {
+  const params = useSearchParams();
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<any>(null);
 
-export default function Home(){
-  return <main>
-    <section className="hero shell">
-      <Nav/>
-      <div className="heroGrid">
-        <div className="heroCopy">
-          <p className="eyebrow">HUMAN PROVENANCE STANDARD · DRAFT 0.1</p>
-          <h1>Make human contribution <em>provable.</em></h1>
-          <p className="lede">An open provenance standard for declaring, evidencing and verifying meaningful human contribution to digital and physical work in an AI-assisted world.</p>
-          <div className="actions">
-            <Link className="button primary" href="/create">Create a provenance record</Link>
-            <Link className="button ghost" href="/verify">Verify a record</Link>
+  useEffect(() => {
+    const demo = params.get("demo");
+
+    if (demo) {
+      try {
+        setText(decodeURIComponent(demo));
+      } catch {
+        setText(demo);
+      }
+    }
+  }, [params]);
+
+  async function verify() {
+    try {
+      const data = JSON.parse(text);
+
+      const response = await fetch("/api/verify", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(data)
+      });
+
+      const verification = await response.json();
+      setResult(verification);
+    } catch {
+      setResult({
+        validSchema: false,
+        validSignature: false,
+        error: "The input is not valid HPS JSON."
+      });
+    }
+  }
+
+  function clear() {
+    setText("");
+    setResult(null);
+  }
+
+  return (
+    <main className="pageShell">
+      <Nav />
+
+      <header className="pageHead shell">
+        <p className="eyebrow">HPS VERIFIER</p>
+
+        <h1>Inspect the provenance.</h1>
+
+        <p>
+          Paste an HPS manifest below. The verifier examines individual trust
+          signals such as structure, contribution declarations, evidence,
+          identity assurance and cryptographic signature status.
+        </p>
+      </header>
+
+      <section className="verifyBox">
+        <label className="micro">HPS MANIFEST</label>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={`{
+  "hpsVersion": "0.1",
+  "id": "HPS-...",
+  ...
+}`}
+        />
+
+        <div className="actions">
+          <button
+            className="button primary"
+            onClick={verify}
+            disabled={!text.trim()}
+          >
+            Verify record
+          </button>
+
+          <button
+            className="button ghost"
+            onClick={clear}
+            disabled={!text && !result}
+          >
+            Clear
+          </button>
+        </div>
+
+        {result && (
+          <div className="result">
+            <p className="micro">VERIFICATION RESULT</p>
+
+            <h2 className={result.validSchema ? "success" : "error"}>
+              {result.validSchema
+                ? "✓ Manifest structure valid"
+                : "✕ Verification failed"}
+            </h2>
+
+            {result.validSchema && (
+              <div className="verificationGrid">
+                <div>
+                  <span>Schema</span>
+                  <strong>✓ Valid</strong>
+                </div>
+
+                <div>
+                  <span>Signature</span>
+                  <strong>
+                    {result.validSignature
+                      ? "✓ Valid"
+                      : "Not signed / not verified"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Identity assurance</span>
+                  <strong>{result.identityStatus ?? "Unknown"}</strong>
+                </div>
+
+                <div>
+                  <span>Human contributions</span>
+                  <strong>{result.contributions?.human ?? 0}</strong>
+                </div>
+
+                <div>
+                  <span>AI-assisted contributions</span>
+                  <strong>{result.contributions?.aiAssisted ?? 0}</strong>
+                </div>
+
+                <div>
+                  <span>Automated contributions</span>
+                  <strong>{result.contributions?.automated ?? 0}</strong>
+                </div>
+              </div>
+            )}
+
+            <details>
+              <summary>Technical verification data</summary>
+              <pre>{JSON.stringify(result, null, 2)}</pre>
+            </details>
           </div>
-          <div className="trustLine"><span>Open standard</span><span>SHA-256</span><span>Privacy-first</span><span>AI-neutral</span></div>
-        </div>
-        <div className="recordCard premiumCard">
-          <div className="cardTop"><span className="status"><i/> HPS RECORD</span><span className="recordId">HPS-2026-KE-000001</span></div>
-          <p className="micro">CONTRIBUTION PROFILE</p>
-          <h2>Human-led<br/>Computationally rendered</h2>
-          <dl>
-            <div><dt>Creator</dt><dd>Basil Okoth Kaudo</dd></div>
-            <div><dt>Human contribution</dt><dd>Concept · Algorithm design · Selection · Final approval</dd></div>
-            <div><dt>Tool contribution</dt><dd>Python rendering</dd></div>
-            <div><dt>Evidence</dt><dd>2 hashed process records</dd></div>
-            <div><dt>Integrity</dt><dd className="gold">✓ Fingerprinted</dd></div>
-          </dl>
-        </div>
-      </div>
-    </section>
+        )}
+      </section>
+    </main>
+  );
+}
 
-    <section className="statement shell">
-      <p className="eyebrow">THE PROBLEM</p>
-      <h2>When exceptional work is dismissed as “just AI,” trust breaks down.</h2>
-      <p className="statementBody">HPS changes the question from <strong>“Did AI make this?”</strong> to <strong>“What did the human contribute, what did tools contribute, and what evidence supports those claims?”</strong></p>
-    </section>
+export default function VerifyPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="pageShell">
+          <Nav />
 
-    <section className="pillars shell">
-      {pillars.map(([t,b],i)=><article key={t}><span>0{i+1}</span><h3>{t}</h3><p>{b}</p></article>)}
-    </section>
-
-    <section className="workflow shell">
-      <div><p className="eyebrow">HOW IT WORKS</p><h2>From work to verifiable provenance in minutes.</h2></div>
-      <ol>
-        <li><b>01</b><div><h3>Fingerprint the work</h3><p>Your browser calculates a SHA-256 fingerprint locally.</p></div></li>
-        <li><b>02</b><div><h3>Declare contribution</h3><p>Record human work, AI assistance, tools and evidence.</p></div></li>
-        <li><b>03</b><div><h3>Create the manifest</h3><p>Generate a portable machine-readable provenance record.</p></div></li>
-        <li><b>04</b><div><h3>Share and verify</h3><p>Use the manifest, HPS ID and public verification workflow.</p></div></li>
-      </ol>
-    </section>
-  </main>
+          <section className="pageHead shell">
+            <p className="eyebrow">HPS VERIFIER</p>
+            <h1>Loading verifier…</h1>
+          </section>
+        </main>
+      }
+    >
+      <VerifyContent />
+    </Suspense>
+  );
 }
