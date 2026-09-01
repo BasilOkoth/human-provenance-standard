@@ -1,26 +1,82 @@
 import { HPSManifestSchema } from "./schema";
-import { verifyManifestSignature } from "./crypto";
+import { verifyRegistrySignature } from "./crypto";
 
-export function verifyHPSManifest(input:unknown) {
+export function verifyHPSManifest(input: unknown) {
   const parsed = HPSManifestSchema.safeParse(input);
+
   if (!parsed.success) {
-    return { validSchema:false, validSignature:false, errors:parsed.error.issues };
+    return {
+      validSchema: false,
+      validRegistrySignature: false,
+      creatorSignaturePresent: false,
+      identityStatus: "unknown",
+      errors: parsed.error.issues
+    };
   }
-  const m = parsed.data;
+
+  const manifest = parsed.data;
+
+  const finalActor = manifest.actors.find(
+    actor =>
+      actor.id ===
+      manifest.responsibility.finalApprovalActorId
+  );
+
   return {
-    validSchema:true,
-    validSignature:verifyManifestSignature(m),
-    identityStatus:m.actors.find(a=>a.id===m.responsibility.finalApprovalActorId)?.identityAssurance ?? "unknown",
-    evidence:{
-      public:m.evidence.filter(e=>e.visibility==="public").length,
-      hashed:m.evidence.filter(e=>e.visibility==="hashed").length,
-      sealed:m.evidence.filter(e=>e.visibility==="sealed").length
+    validSchema: true,
+
+    creatorSignaturePresent:
+      Boolean(manifest.creatorSignature),
+
+    validRegistrySignature:
+      verifyRegistrySignature(manifest),
+
+    identityStatus:
+      finalActor?.identityAssurance ?? "unknown",
+
+    assetHash:
+      manifest.work.sha256,
+
+    evidence: {
+      public:
+        manifest.evidence.filter(
+          evidence =>
+            evidence.visibility === "public"
+        ).length,
+
+      hashed:
+        manifest.evidence.filter(
+          evidence =>
+            evidence.visibility === "hashed"
+        ).length,
+
+      sealed:
+        manifest.evidence.filter(
+          evidence =>
+            evidence.visibility === "sealed"
+        ).length
     },
-    contributions:{
-      human:m.contributions.filter(c=>c.origin==="human").length,
-      aiAssisted:m.contributions.filter(c=>c.origin==="ai_assisted").length,
-      automated:m.contributions.filter(c=>c.origin==="automated").length
+
+    contributions: {
+      human:
+        manifest.contributions.filter(
+          contribution =>
+            contribution.origin === "human"
+        ).length,
+
+      aiAssisted:
+        manifest.contributions.filter(
+          contribution =>
+            contribution.origin === "ai_assisted"
+        ).length,
+
+      automated:
+        manifest.contributions.filter(
+          contribution =>
+            contribution.origin === "automated"
+        ).length
     },
-    errors:[]
+
+    errors: []
   };
 }
