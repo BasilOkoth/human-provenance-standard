@@ -1,33 +1,61 @@
+import Link from "next/link";
+import Nav from "@/components/Nav";
+
+const pillars=[
+  ["Human contribution","Make meaningful human work visible without pretending AI does not exist."],
+  ["Evidence","Back authorship claims with hashes, drafts, commits, renders and attestations."],
+  ["Integrity","Bind a record to the exact work using cryptographic fingerprints."],
+  ["Responsibility","Show who stands behind the final output and accepts responsibility for it."]
+];
+
 export default function Home(){
   return <main>
-    <section className="hero">
-      <nav><strong>HPS</strong><span>Draft 0.1 · Open Standard</span></nav>
-      <div className="heroCopy">
-        <p className="eyebrow">HUMAN PROVENANCE STANDARD</p>
-        <h1>Proof of human contribution.</h1>
-        <p className="lede">An open standard for declaring, evidencing and verifying meaningful human contribution to digital and physical work in an AI-assisted world.</p>
-      </div>
-      <div className="card">
-        <small>HPS RECORD</small>
-        <h2>Human-led · AI-assisted</h2>
-        <div><span>Creator</span><b>Basil Okoth Kaudo</b></div>
-        <div><span>Human contribution</span><b>Concept · Algorithm design · Selection · Final approval</b></div>
-        <div><span>Machine contribution</span><b>Computational rendering</b></div>
-        <div><span>Integrity</span><b>Verified</b></div>
+    <section className="hero shell">
+      <Nav/>
+      <div className="heroGrid">
+        <div className="heroCopy">
+          <p className="eyebrow">HUMAN PROVENANCE STANDARD · DRAFT 0.1</p>
+          <h1>Make human contribution <em>provable.</em></h1>
+          <p className="lede">An open provenance standard for declaring, evidencing and verifying meaningful human contribution to digital and physical work in an AI-assisted world.</p>
+          <div className="actions">
+            <Link className="button primary" href="/create">Create a provenance record</Link>
+            <Link className="button ghost" href="/verify">Verify a record</Link>
+          </div>
+          <div className="trustLine"><span>Open standard</span><span>SHA-256</span><span>Privacy-first</span><span>AI-neutral</span></div>
+        </div>
+        <div className="recordCard premiumCard">
+          <div className="cardTop"><span className="status"><i/> HPS RECORD</span><span className="recordId">HPS-2026-KE-000001</span></div>
+          <p className="micro">CONTRIBUTION PROFILE</p>
+          <h2>Human-led<br/>Computationally rendered</h2>
+          <dl>
+            <div><dt>Creator</dt><dd>Basil Okoth Kaudo</dd></div>
+            <div><dt>Human contribution</dt><dd>Concept · Algorithm design · Selection · Final approval</dd></div>
+            <div><dt>Tool contribution</dt><dd>Python rendering</dd></div>
+            <div><dt>Evidence</dt><dd>2 hashed process records</dd></div>
+            <div><dt>Integrity</dt><dd className="gold">✓ Fingerprinted</dd></div>
+          </dl>
+        </div>
       </div>
     </section>
 
-    <section className="section">
-      <p className="eyebrow">WHY HPS</p>
-      <h2>Authorship should be demonstrated through provenance, not guessed from polish.</h2>
-      <div className="grid">
-        <article><b>01</b><h3>Neutral toward AI</h3><p>HPS records contribution. It does not judge whether AI use is good or bad.</p></article>
-        <article><b>02</b><h3>Evidence over assertion</h3><p>Claims can be backed by hashes, drafts, commits, renders and attestations.</p></article>
-        <article><b>03</b><h3>Privacy by design</h3><p>Evidence can stay private while its cryptographic fingerprint remains verifiable.</p></article>
-        <article><b>04</b><h3>Human + machine readable</h3><p>People see a clear provenance profile; software sees structured data.</p></article>
-        <article><b>05</b><h3>Interoperable</h3><p>Designed to complement C2PA, verifiable credentials and modern trust infrastructure.</p></article>
-        <article><b>06</b><h3>Responsibility</h3><p>Every record makes clear who stands behind the final work.</p></article>
-      </div>
+    <section className="statement shell">
+      <p className="eyebrow">THE PROBLEM</p>
+      <h2>When exceptional work is dismissed as “just AI,” trust breaks down.</h2>
+      <p className="statementBody">HPS changes the question from <strong>“Did AI make this?”</strong> to <strong>“What did the human contribute, what did tools contribute, and what evidence supports those claims?”</strong></p>
+    </section>
+
+    <section className="pillars shell">
+      {pillars.map(([t,b],i)=><article key={t}><span>0{i+1}</span><h3>{t}</h3><p>{b}</p></article>)}
+    </section>
+
+    <section className="workflow shell">
+      <div><p className="eyebrow">HOW IT WORKS</p><h2>From work to verifiable provenance in minutes.</h2></div>
+      <ol>
+        <li><b>01</b><div><h3>Fingerprint the work</h3><p>Your browser calculates a SHA-256 fingerprint locally.</p></div></li>
+        <li><b>02</b><div><h3>Declare contribution</h3><p>Record human work, AI assistance, tools and evidence.</p></div></li>
+        <li><b>03</b><div><h3>Create the manifest</h3><p>Generate a portable machine-readable provenance record.</p></div></li>
+        <li><b>04</b><div><h3>Share and verify</h3><p>Use the manifest, HPS ID and public verification workflow.</p></div></li>
+      </ol>
     </section>
   </main>
 }

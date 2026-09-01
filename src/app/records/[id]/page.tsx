@@ -1,0 +1,10 @@
+import Nav from "@/components/Nav";
+const demo:any={
+"HPS-2026-KE-000001":{title:"Nebula I — Emergence",creator:"Basil Okoth Kaudo",profile:"Human-led · Computationally rendered",human:"Concept · Algorithm design · Selection · Final approval",machine:"Python computational rendering",evidence:"2 hashed process records",identity:"Self-declared",integrity:"SHA-256 fingerprint recorded"},
+"HPS-DEMO-SOFTWARE":{title:"Reference Software Build",creator:"HPS Demo",profile:"Human-led · AI-assisted",human:"Architecture · Testing · Final approval",machine:"AI-assisted code generation",evidence:"Git commits and source hash",identity:"Demonstration",integrity:"Fingerprint recorded"},
+"HPS-DEMO-RESEARCH":{title:"Research Provenance Example",creator:"HPS Demo",profile:"Human-led · AI-assisted",human:"Research question · Analysis · Interpretation · Final approval",machine:"Language and coding assistance",evidence:"Notebook and manuscript hashes",identity:"Demonstration",integrity:"Fingerprint recorded"}
+};
+export default async function Record({params}:{params:Promise<{id:string}>}){
+ const{id}=await params;const r=demo[decodeURIComponent(id)];
+ return <main className="pageShell"><Nav/><header className="pageHead shell"><p className="eyebrow">HPS PROVENANCE RECORD</p><h1>{r?.title??"Record not found"}</h1><p>{r?.profile}</p></header>{r&&<section className="recordDetail"><p className="micro">{decodeURIComponent(id)}</p><dl><div><dt>Creator</dt><dd>{r.creator}</dd></div><div><dt>Human contribution</dt><dd>{r.human}</dd></div><div><dt>Machine / tool contribution</dt><dd>{r.machine}</dd></div><div><dt>Evidence</dt><dd>{r.evidence}</dd></div><div><dt>Identity assurance</dt><dd>{r.identity}</dd></div><div><dt>Integrity</dt><dd>{r.integrity}</dd></div></dl><div className="notice">HPS records describe provenance claims and evidence strength. They are not automatic proof of copyright, originality or truthfulness.</div></section>}</main>
+}

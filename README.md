@@ -4,40 +4,34 @@
 
 HPS is an experimental open standard for declaring, evidencing and verifying meaningful human contribution to digital and physical work.
 
-It is not an AI detector. It is a provenance layer.
+## Premium prototype includes
+- Creator Studio
+- browser-local SHA-256 file fingerprinting
+- portable `.hps.json` manifests
+- AI/tool disclosure
+- contribution vocabulary
+- verification API
+- demo provenance registry
+- public record pages
+- developer documentation
+- standards page
+- Render deployment config
 
-## Repository contents
-
-- `schemas/` — draft standard schema
-- `src/lib/hps/` — TypeScript reference implementation
-- `scripts/` — key generation, signing and verification
-- `examples/` — sample provenance manifest
-- `docs/SPEC.md` — draft normative specification
-- `src/app/` — premium Next.js reference interface
-
-## Quick start
-
+## Run
 ```bash
 npm install
 npm run dev
 ```
 
-## Sign and verify the example
-
+## Render
+Build:
 ```bash
-npm run keygen
-npm run sign:example
-npm run verify:example
+npm install && npm run build
 ```
 
-Never commit `hps-keypair.json`.
+Start:
+```bash
+npm start
+```
 
-## Long-term direction
-
-HPS is intended to complement:
-- C2PA Content Credentials
-- W3C Verifiable Credentials
-- cryptographic transparency logs
-- institutional identity systems
-
-**HPS 0.1 is a draft and is not yet an accredited international standard.**
+HPS 0.1 is experimental and is not yet an accredited international standard.
