@@ -8,8 +8,22 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createServerSupabase();
-    await supabase.auth.exchangeCodeForSession(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (error) {
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL ??
+        "https://human-provenance-standard.onrender.com";
+
+      const loginUrl = new URL("/login", appUrl);
+      loginUrl.searchParams.set("error", error.message);
+      return NextResponse.redirect(loginUrl);
+    }
   }
 
-  return NextResponse.redirect(new URL(next, url.origin));
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    "https://human-provenance-standard.onrender.com";
+
+  return NextResponse.redirect(new URL(next, appUrl));
 }
