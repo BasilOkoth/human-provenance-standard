@@ -7,6 +7,29 @@ export const contributionTypes = [
   "final_approval","other"
 ] as const;
 
+
+export const AssetFingerprintSchema = z.object({
+  version: z.literal("hps-fingerprint-1"),
+  exactSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  mimeType: z.string().max(200),
+  fileName: z.string().max(500).optional(),
+  byteLength: z.number().int().nonnegative(),
+  modality: z.enum(["text","visual","text_visual","binary"]),
+  canonicalTextSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+  canonicalTextLength: z.number().int().nonnegative().nullable().optional(),
+  textSimHash64: z.string().regex(/^[a-f0-9]{16}$/i).nullable().optional(),
+  pageCount: z.number().int().positive().nullable().optional(),
+  visualPHashes: z.array(z.string().regex(/^[a-f0-9]{16}$/i)).optional(),
+  visualDHashes: z.array(z.string().regex(/^[a-f0-9]{16}$/i)).optional(),
+  visualPageIndexes: z.array(z.number().int().positive()).optional(),
+  visualCoverage: z.number().min(0).max(1).nullable().optional(),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+  warnings: z.array(z.string().max(500)).optional()
+});
+
+export type AssetFingerprint = z.infer<typeof AssetFingerprintSchema>;
+
 export const IdentityAssuranceSchema = z.enum([
   "self_declared","account_verified","identity_verified","institutionally_attested",
   "organization_account_verified","institution_verified","authorized_issuer_verified"
@@ -25,6 +48,7 @@ export const CreatorClaimSchema = z.object({
   workType: z.string().min(1).max(100),
   fileName: z.string().max(500).optional(),
   assetHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  assetFingerprint: AssetFingerprintSchema.optional(),
   contributionTypes: z.array(z.enum(contributionTypes)).min(1),
   aiUsed: z.boolean(),
   primaryTool: z.string().max(200).nullable().optional(),
@@ -42,6 +66,7 @@ export const InstitutionClaimSchema = z.object({
   subjectName: z.string().max(240).optional(),
   fileName: z.string().max(500).optional(),
   assetHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  assetFingerprint: AssetFingerprintSchema.optional(),
   issuerPublicKey: z.string().min(20),
   issuerKeyId: z.string().uuid(),
   parentRecordId: z.string().nullable().optional(),
@@ -57,7 +82,8 @@ export const HPSManifestSchema = z.object({
     createdAt: z.string().datetime(),
     version: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/i),
-    fileName: z.string().optional()
+    fileName: z.string().optional(),
+    fingerprint: AssetFingerprintSchema.optional()
   }),
   actors: z.array(z.object({
     id: z.string(), name: z.string(), role: z.string(), publicKey: z.string().optional(),

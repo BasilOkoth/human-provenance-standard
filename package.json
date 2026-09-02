@@ -1,8 +1,8 @@
 {
   "name": "human-provenance-standard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Human Provenance Standard (HPS) \u2014 open provenance, institutional issuance, document integrity, evidence and interoperability infrastructure.",
+  "description": "Human Provenance Standard (HPS) \u2014 open provenance, institutional issuance, compression-resilient document integrity, evidence and interoperability infrastructure.",
   "engines": {
     "node": ">=22"
   },
@@ -22,7 +22,9 @@
     "react-dom": "^19.1.1",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "pdfjs-dist": "^5.5.207",
+    "mammoth": "^1.12.2"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
