@@ -1,117 +1,150 @@
-# HPS Disputes / Under-Review Workflow v1
+# HPS Private Dispute Evidence v1
 
-This package adds a controlled challenge-and-review layer to HPS.
+This add-on strengthens the HPS dispute workflow by allowing both sides to upload
+files privately and by cryptographically linking every submission to the case.
 
-## Important design rule
+## What it adds
 
-A dispute submission is **not automatically a public finding**.
+- private Supabase bucket: `hps-dispute-evidence`
+- table: `hps_dispute_files`
+- SHA-256 generated server-side for every uploaded file
+- immutable evidence metadata preserved under the dispute ID
+- challenger uploads
+- record-holder / institutional issuer response uploads
+- automatic comparison against the HPS record's registered `asset_hash`
+- explicit `exact_asset_match` result
+- private signed download links
+- HPS admin evidence endpoint
+- case workspace at `/disputes/[id]`
 
-Flow:
+## Install order
 
-`ACTIVE → challenge submitted (record remains active) → UNDER REVIEW → ACTIVE or REVOKED`
+This package assumes the earlier dispute workflow is installed and the following
+table already exists:
 
-This prevents malicious or frivolous submissions from instantly damaging a valid record.
+`hps_disputes`
 
-## Files
+### 1. Run migration
 
-1. Run:
-   `supabase/migrations/20260903_150_disputes.sql`
+Run:
 
-2. Add:
-   `src/app/api/records/[id]/disputes/route.ts`
+`supabase/migrations/20260903_160_private_dispute_evidence.sql`
 
-3. Add:
-   `src/app/api/hps-admin/disputes/route.ts`
+### 2. Add API routes
 
-4. Add:
-   `src/app/dispute/[id]/page.tsx`
+Add:
 
-5. Add:
-   `src/app/hps-admin/disputes/page.tsx`
+`src/app/api/disputes/[id]/files/route.ts`
 
-## Public record page changes
+`src/app/api/disputes/[id]/files/[fileId]/download/route.ts`
 
-Edit:
+`src/app/api/hps-admin/disputes/[id]/evidence/route.ts`
 
-`src/app/records/[id]/page.tsx`
+### 3. Add private case page
 
-### A. Add public status banners
+Add:
 
-Immediately after the existing revoked/superseded banners add:
+`src/app/disputes/[id]/page.tsx`
 
-```tsx
-{data.status === "under_review" && (
-  <div className="supersededBanner">
-    UNDER REVIEW · A provenance challenge has been accepted for formal review.
-    This status is not a finding that the record is false.
-  </div>
-)}
+## Update the dispute submission page
+
+After a dispute is successfully created, direct the challenger to the private
+case workspace.
+
+If your existing POST result contains:
+
+```ts
+result.disputeId
 ```
 
-If you later add a separate `disputed` record status, keep it distinct from
-`under_review`. In this v1 design, merely submitting a dispute does not change
-the public record status.
+replace the simple success state with:
 
-### B. Add challenge action
-
-Inside the existing action area add:
-
-```tsx
-{data.status !== "revoked" && (
-  <Link className="button darkButton" href={`/dispute/${id}`}>
-    Challenge provenance
-  </Link>
-)}
+```ts
+window.location.href = `/disputes/${result.disputeId}`;
 ```
 
-Example:
+This lets the challenger immediately upload private evidence.
 
-```tsx
-<div className="actions">
-  <Link className="button primary" href="/verify">Verify this file</Link>
-  <Link className="button darkButton" href={`/api/records/${id}/credentials`}>VC export</Link>
-  <Link className="button darkButton" href={`/api/records/${id}/c2pa`}>C2PA mapping</Link>
-  {data.status !== "revoked" && (
-    <Link className="button darkButton" href={`/dispute/${id}`}>
-      Challenge provenance
-    </Link>
-  )}
-</div>
-```
+## Add record-holder access
 
-## Record status constraint
+When HPS notifies a creator or institutional issuer of a challenge, link them to:
 
-If `hps_records.status` is protected by a PostgreSQL CHECK constraint that only
-allows older values such as `active`, `revoked`, and `superseded`, update that
-constraint to include `under_review` before using this workflow.
+`/disputes/{disputeId}`
 
-Because the original base migration that created `hps_records` may differ from
-the currently visible migration set, inspect the existing constraint in Supabase
-before changing it. Do not blindly drop a constraint whose exact name you have
-not confirmed.
+The server determines their role automatically. They cannot impersonate the
+challenger.
 
-## Admin access
+## Admin review
 
-The review API uses:
+The HPS administrator can query:
 
-`HPS_ADMIN_EMAILS`
+`GET /api/hps-admin/disputes/{disputeId}/evidence`
 
-Your existing HPS deployment already uses this environment variable for HPS
-administrator access. Keep that server-side only.
+The response includes:
+- record metadata
+- registered SHA-256
+- every private evidence fingerprint
+- who supplied it (challenger vs record holder)
+- purpose
+- exact-asset-match result
+- number of exact registered-asset submissions
 
-Admin review page:
+Admin/private file opening uses:
 
-`/hps-admin/disputes`
+`/api/disputes/{disputeId}/files/{fileId}/download`
 
-## Why this is safer than automatic "disputed"
+The route creates a short-lived signed URL. The storage bucket itself remains
+private.
 
-Any authenticated person can make an allegation. HPS should not present an
-allegation as a verified fact. Therefore:
+## Security / trust semantics
 
-- `open` = challenge received privately
-- `under_review` = HPS accepted it for formal review
-- `resolved_no_issue` = no material issue established
-- `misrepresentation_found` = review found material misrepresentation and the
-  record is revoked
+### A hash match means only exact identity of bytes
 
-The original signed manifest is never edited.
+When:
+
+`uploaded_file_sha256 === hps_records.asset_hash`
+
+HPS may say:
+
+`✓ SHA-256 EXACT MATCH — supplied file is byte-for-byte identical to the registered HPS asset.`
+
+It must NOT automatically say:
+- authentic content
+- truthful content
+- valid certificate
+- human-created
+- institutionally genuine
+
+Those conclusions require separate provenance and review evidence.
+
+### A non-match is not automatically evidence of fraud
+
+A PDF saved again, image recompressed, metadata modified or messaging-app copy
+can produce a different SHA-256. HPS should state:
+
+`No exact byte match with the registered asset.`
+
+Do not label the file fraudulent solely because hashes differ.
+
+## Privacy
+
+This implementation deliberately creates no public Storage RLS policy.
+Files are accessed through server routes using authenticated authorization.
+
+Allowed private viewers:
+- challenger who opened the dispute
+- record owner
+- active institutional admin/issuer for institutional records
+- HPS admin for formal review
+
+## Recommended later hardening
+
+For production institutional adoption, consider:
+- malware scanning before reviewer download
+- retention policy for resolved disputes
+- evidence deletion/legal-hold policy
+- encryption-at-rest/key-management documentation
+- maximum case/file quotas
+- audit log for every evidence download
+- automatic notifications to the record holder
+- signed reviewer decisions
