@@ -1,0 +1,116 @@
+diff --git a/src/lib/hps/schema.ts b/src/lib/hps/schema.ts
+--- a/src/lib/hps/schema.ts
++++ b/src/lib/hps/schema.ts
+@@
+ const SignatureSchema = z.object({
+@@
+ });
++
++export const CreatorEvidenceSchema = z.object({
++  id: z.string().min(4).max(120),
++  type: z.enum(["draft","source_code","version_history","research_notes","sketch","screenshot","dataset","notebook","ai_interaction","other"]),
++  visibility: z.enum(["hashed","sealed"]).default("sealed"),
++  fileName: z.string().min(1).max(500),
++  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
++  note: z.string().max(1000).optional()
++});
++
++export const CreatorDeclarationSchema = z.object({
++  version: z.literal("hps-creator-declaration-1"),
++  accepted: z.literal(true),
++  statement: z.literal("I declare that the provenance and contribution information I have provided is accurate to the best of my knowledge. I understand that materially false or misleading claims may cause this HPS record to be disputed, suspended or revoked."),
++  acceptedAt: z.string().datetime()
++});
+@@
+   processNoteHash: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
++  supportingEvidence: z.array(CreatorEvidenceSchema).max(20).default([]),
++  declaration: CreatorDeclarationSchema,
+   creatorPublicKey: z.string().min(20),
+@@
+ });
+
+diff --git a/src/app/create/page.tsx b/src/app/create/page.tsx
+--- a/src/app/create/page.tsx
++++ b/src/app/create/page.tsx
+@@
+ type PreflightResult = {
+@@
+ };
++
++type PendingEvidence = { id:string; type:string; visibility:"hashed"|"sealed"; file:File; sha256:string; note:string };
++const DECLARATION = "I declare that the provenance and contribution information I have provided is accurate to the best of my knowledge. I understand that materially false or misleading claims may cause this HPS record to be disputed, suspended or revoked.";
+@@
+   const [processNote, setProcessNote] = useState("");
++  const [pendingEvidence, setPendingEvidence] = useState<PendingEvidence[]>([]);
++  const [evidenceType, setEvidenceType] = useState("draft");
++  const [evidenceVisibility, setEvidenceVisibility] = useState<"hashed"|"sealed">("sealed");
++  const [evidenceNote, setEvidenceNote] = useState("");
++  const [declarationAccepted, setDeclarationAccepted] = useState(false);
+   const [keyPassphrase, setKeyPassphrase] = useState("");
+@@
+         contributions.length &&
++        declarationAccepted &&
+         keyPassphrase &&
+@@
+       contributions,
++      declarationAccepted,
+       keyPassphrase,
+@@
+   );
++
++  async function hashFileSha256(file: File) {
++    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
++    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,"0")).join("");
++  }
++
++  async function addEvidence(file?: File) {
++    if (!file) return;
++    if (pendingEvidence.length >= 20) return setError("A maximum of 20 supporting evidence files may be attached.");
++    const sha256 = await hashFileSha256(file);
++    const id = "ev_" + crypto.randomUUID().replaceAll("-", "").slice(0,16);
++    setPendingEvidence(current => [...current,{ id,type:evidenceType,visibility:evidenceVisibility,file,sha256,note:evidenceNote.trim() }]);
++    setEvidenceNote("");
++  }
++
++  function removeEvidence(id:string) { setPendingEvidence(current => current.filter(item => item.id !== id)); }
+@@
+       const creatorClaim = {
+@@
+         processNoteHash,
++        supportingEvidence: pendingEvidence.map(item => ({ id:item.id,type:item.type,visibility:item.visibility,fileName:item.file.name,sha256:item.sha256,note:item.note || undefined })),
++        declaration: { version:"hps-creator-declaration-1",accepted:true,statement:DECLARATION,acceptedAt:new Date().toISOString() },
+         creatorPublicKey: publicKey,
+@@
+       if (!response.ok) {
+@@
+       }
++
++      for (const item of pendingEvidence) {
++        const form = new FormData();
++        form.set("file", item.file);
++        form.set("evidenceId", item.id);
++        const evidenceResponse = await fetch(`/api/records/${data.id}/evidence`, { method:"POST", body:form });
++        const evidenceResult = await evidenceResponse.json();
++        if (!evidenceResponse.ok) throw new Error(`Record ${data.id} was registered, but evidence ${item.file.name} could not be attached: ${evidenceResult.error || "upload failed"}`);
++      }
+@@
+           <div className="field full">
+             <label>
+               Process evidence / note
+@@
+             />
+           </div>
++
++          <div className="field"><label>Supporting evidence type</label><select value={evidenceType} onChange={e=>setEvidenceType(e.target.value)}><option value="draft">Draft</option><option value="source_code">Source code</option><option value="version_history">Version history</option><option value="research_notes">Research notes</option><option value="sketch">Sketch</option><option value="screenshot">Screenshot</option><option value="dataset">Dataset</option><option value="notebook">Notebook</option><option value="ai_interaction">AI interaction / export</option><option value="other">Other</option></select></div>
++          <div className="field"><label>Evidence visibility</label><select value={evidenceVisibility} onChange={e=>setEvidenceVisibility(e.target.value as "hashed"|"sealed")}><option value="sealed">Sealed — file stored privately</option><option value="hashed">Hash only — HPS stores fingerprint, not file</option></select></div>
++          <div className="field"><label>Evidence description</label><input value={evidenceNote} onChange={e=>setEvidenceNote(e.target.value)} placeholder="e.g. First draft before editing"/></div>
++          <div className="field"><label>Add evidence file</label><input type="file" onChange={e=>{addEvidence(e.target.files?.[0]);e.currentTarget.value="";}}/></div>
++          {pendingEvidence.length>0&&<div className="field full"><strong>Evidence attached to signed claim</strong>{pendingEvidence.map(item=><div key={item.id} className="hashBox" style={{marginTop:8}}><span>{item.type.replaceAll("_"," ")} · {item.visibility}</span><code>{item.file.name} · {item.sha256}</code><button type="button" className="button darkButton" onClick={()=>removeEvidence(item.id)}>Remove</button></div>)}</div>}
++
++          <div className="sectionLabel">04 · Provenance declaration</div>
++          <div className="field full"><label className="check"><input type="checkbox" checked={declarationAccepted} onChange={e=>setDeclarationAccepted(e.target.checked)}/><span>{DECLARATION}</span></label><p className="muted">Your acceptance is included inside the creator-signed HPS claim. HPS verifies the signed declaration and evidence fingerprints; it does not guarantee every factual statement made by a creator is true.</p></div>
+ 
+           <div className="sectionLabel">
+-            04 · Creator signature
++            05 · Creator signature
+           </div>
