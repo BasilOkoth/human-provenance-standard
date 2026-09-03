@@ -1,150 +1,65 @@
-# HPS Private Dispute Evidence v1
+# HPS Dispute Notifications + Admin Review v1
 
-This add-on strengthens the HPS dispute workflow by allowing both sides to upload
-files privately and by cryptographically linking every submission to the case.
+This package adds:
 
-## What it adds
+- automatic in-app notification to the creator or institutional admin/issuer when a record is challenged
+- optional email notification via Resend
+- `/notifications` inbox
+- visible `Alerts (N)` link in navigation
+- admin review workspace at `/hps-admin/disputes/{disputeId}`
+- private document review
+- SHA-256 exact-match visibility
+- request-more-evidence workflow for either challenger or record holder/institution
+- optional evidence due date
+- preserved evidence-request history
 
-- private Supabase bucket: `hps-dispute-evidence`
-- table: `hps_dispute_files`
-- SHA-256 generated server-side for every uploaded file
-- immutable evidence metadata preserved under the dispute ID
-- challenger uploads
-- record-holder / institutional issuer response uploads
-- automatic comparison against the HPS record's registered `asset_hash`
-- explicit `exact_asset_match` result
-- private signed download links
-- HPS admin evidence endpoint
-- case workspace at `/disputes/[id]`
+## Install
 
-## Install order
+1. Run:
+   `supabase/migrations/20260903_170_dispute_notifications_and_requests.sql`
 
-This package assumes the earlier dispute workflow is installed and the following
-table already exists:
+2. Add:
+   `src/lib/hps/notifications.ts`
 
-`hps_disputes`
+3. Add:
+   `src/app/api/notifications/route.ts`
+   `src/app/notifications/page.tsx`
 
-### 1. Run migration
+4. Replace:
+   `src/components/Nav.tsx`
 
-Run:
+5. Replace:
+   `src/app/api/records/[id]/disputes/route.ts`
 
-`supabase/migrations/20260903_160_private_dispute_evidence.sql`
+6. Replace:
+   `src/app/api/hps-admin/disputes/[id]/evidence/route.ts`
 
-### 2. Add API routes
+7. Add:
+   `src/app/hps-admin/disputes/[id]/page.tsx`
 
-Add:
+8. Replace:
+   `src/app/hps-admin/disputes/page.tsx`
 
-`src/app/api/disputes/[id]/files/route.ts`
+## Optional email
 
-`src/app/api/disputes/[id]/files/[fileId]/download/route.ts`
+In-app notifications work immediately once the migration is active.
 
-`src/app/api/hps-admin/disputes/[id]/evidence/route.ts`
+To also email users, set in Render:
 
-### 3. Add private case page
+`RESEND_API_KEY=...`
+`HPS_FROM_EMAIL=HPS <notifications@your-verified-domain>`
 
-Add:
+Do not use NEXT_PUBLIC_ for the API key.
 
-`src/app/disputes/[id]/page.tsx`
+## Flow
 
-## Update the dispute submission page
+Challenge submitted
+→ owner/institution gets HPS alert
+→ owner opens private dispute workspace
+→ admin opens review workspace
+→ admin opens submitted private documents
+→ admin can request more from owner/institution or challenger
+→ requested party gets another alert
+→ reviewer decides: no material issue / misrepresentation found
 
-After a dispute is successfully created, direct the challenger to the private
-case workspace.
-
-If your existing POST result contains:
-
-```ts
-result.disputeId
-```
-
-replace the simple success state with:
-
-```ts
-window.location.href = `/disputes/${result.disputeId}`;
-```
-
-This lets the challenger immediately upload private evidence.
-
-## Add record-holder access
-
-When HPS notifies a creator or institutional issuer of a challenge, link them to:
-
-`/disputes/{disputeId}`
-
-The server determines their role automatically. They cannot impersonate the
-challenger.
-
-## Admin review
-
-The HPS administrator can query:
-
-`GET /api/hps-admin/disputes/{disputeId}/evidence`
-
-The response includes:
-- record metadata
-- registered SHA-256
-- every private evidence fingerprint
-- who supplied it (challenger vs record holder)
-- purpose
-- exact-asset-match result
-- number of exact registered-asset submissions
-
-Admin/private file opening uses:
-
-`/api/disputes/{disputeId}/files/{fileId}/download`
-
-The route creates a short-lived signed URL. The storage bucket itself remains
-private.
-
-## Security / trust semantics
-
-### A hash match means only exact identity of bytes
-
-When:
-
-`uploaded_file_sha256 === hps_records.asset_hash`
-
-HPS may say:
-
-`✓ SHA-256 EXACT MATCH — supplied file is byte-for-byte identical to the registered HPS asset.`
-
-It must NOT automatically say:
-- authentic content
-- truthful content
-- valid certificate
-- human-created
-- institutionally genuine
-
-Those conclusions require separate provenance and review evidence.
-
-### A non-match is not automatically evidence of fraud
-
-A PDF saved again, image recompressed, metadata modified or messaging-app copy
-can produce a different SHA-256. HPS should state:
-
-`No exact byte match with the registered asset.`
-
-Do not label the file fraudulent solely because hashes differ.
-
-## Privacy
-
-This implementation deliberately creates no public Storage RLS policy.
-Files are accessed through server routes using authenticated authorization.
-
-Allowed private viewers:
-- challenger who opened the dispute
-- record owner
-- active institutional admin/issuer for institutional records
-- HPS admin for formal review
-
-## Recommended later hardening
-
-For production institutional adoption, consider:
-- malware scanning before reviewer download
-- retention policy for resolved disputes
-- evidence deletion/legal-hold policy
-- encryption-at-rest/key-management documentation
-- maximum case/file quotas
-- audit log for every evidence download
-- automatic notifications to the record holder
-- signed reviewer decisions
+A challenge remains an allegation until reviewed.

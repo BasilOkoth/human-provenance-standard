@@ -5,18 +5,23 @@ import { useEffect, useState } from "react";
 
 export default function Nav() {
   const [open, setOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     function closeOnResize() {
       if (window.innerWidth > 900) setOpen(false);
     }
     window.addEventListener("resize", closeOnResize);
+
+    fetch("/api/notifications")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setUnread(Number(data.unread || 0)); })
+      .catch(() => {});
+
     return () => window.removeEventListener("resize", closeOnResize);
   }, []);
 
-  function closeMenu() {
-    setOpen(false);
-  }
+  function closeMenu() { setOpen(false); }
 
   return (
     <nav className="nav shell">
@@ -35,6 +40,9 @@ export default function Nav() {
       </div>
 
       <div className="navActions">
+        <Link className="navText" href="/notifications">
+          Alerts{unread > 0 ? ` (${unread})` : ""}
+        </Link>
         <Link className="navText" href="/account">Account</Link>
         <Link className="navCta" href="/create">Create record</Link>
 
@@ -46,16 +54,11 @@ export default function Nav() {
           onClick={() => setOpen((value) => !value)}
           type="button"
         >
-          <span />
-          <span />
-          <span />
+          <span /><span /><span />
         </button>
       </div>
 
-      <div
-        id="mobile-navigation"
-        className={`mobileMenu ${open ? "mobileMenuOpen" : ""}`}
-      >
+      <div id="mobile-navigation" className={`mobileMenu ${open ? "mobileMenuOpen" : ""}`}>
         <div className="mobileMenuInner">
           <Link href="/create" onClick={closeMenu}>Create</Link>
           <Link href="/verify" onClick={closeMenu}>Verify</Link>
@@ -63,11 +66,9 @@ export default function Nav() {
           <Link href="/institutional" onClick={closeMenu}>Institutional</Link>
           <Link href="/docs" onClick={closeMenu}>Standard</Link>
           <Link href="/developers" onClick={closeMenu}>Developers</Link>
+          <Link href="/notifications" onClick={closeMenu}>Alerts{unread > 0 ? ` (${unread})` : ""}</Link>
           <Link href="/account" onClick={closeMenu}>Account</Link>
-
-          <Link className="mobileMenuCta" href="/create" onClick={closeMenu}>
-            Create record
-          </Link>
+          <Link className="mobileMenuCta" href="/create" onClick={closeMenu}>Create record</Link>
         </div>
       </div>
     </nav>
