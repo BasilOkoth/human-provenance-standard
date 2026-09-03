@@ -1,77 +1,117 @@
-# HPS Revocation UI
+# HPS Disputes / Under-Review Workflow v1
 
-The repository already contains a working revocation API at:
+This package adds a controlled challenge-and-review layer to HPS.
 
-`src/app/api/records/[id]/revoke/route.ts`
+## Important design rule
 
-This package adds the missing user-facing record control and hardens the API.
+A dispute submission is **not automatically a public finding**.
 
-## 1. Add the client component
+Flow:
 
-Create:
+`ACTIVE → challenge submitted (record remains active) → UNDER REVIEW → ACTIVE or REVOKED`
 
-`src/components/RevokeRecord.tsx`
+This prevents malicious or frivolous submissions from instantly damaging a valid record.
 
-using the supplied `RevokeRecord.tsx`.
+## Files
 
-## 2. Replace the revoke API
+1. Run:
+   `supabase/migrations/20260903_150_disputes.sql`
 
-Replace:
+2. Add:
+   `src/app/api/records/[id]/disputes/route.ts`
 
-`src/app/api/records/[id]/revoke/route.ts`
+3. Add:
+   `src/app/api/hps-admin/disputes/route.ts`
 
-with the supplied `route.ts`.
+4. Add:
+   `src/app/dispute/[id]/page.tsx`
 
-The updated route:
-- requires authentication
-- requires a meaningful reason
-- permits the creator/record owner
-- permits active institutional `admin` or `issuer`
-- only revokes active records
-- prevents repeated revocation
-- preserves the record and returns revocation metadata
+5. Add:
+   `src/app/hps-admin/disputes/page.tsx`
 
-## 3. Add it to the public record page
+## Public record page changes
 
-In:
+Edit:
 
 `src/app/records/[id]/page.tsx`
 
-add this import near the top:
+### A. Add public status banners
+
+Immediately after the existing revoked/superseded banners add:
 
 ```tsx
-import RevokeRecord from "@/components/RevokeRecord";
+{data.status === "under_review" && (
+  <div className="supersededBanner">
+    UNDER REVIEW · A provenance challenge has been accepted for formal review.
+    This status is not a finding that the record is false.
+  </div>
+)}
 ```
 
-Then, immediately after the existing action buttons block:
+If you later add a separate `disputed` record status, keep it distinct from
+`under_review`. In this v1 design, merely submitting a dispute does not change
+the public record status.
+
+### B. Add challenge action
+
+Inside the existing action area add:
+
+```tsx
+{data.status !== "revoked" && (
+  <Link className="button darkButton" href={`/dispute/${id}`}>
+    Challenge provenance
+  </Link>
+)}
+```
+
+Example:
 
 ```tsx
 <div className="actions">
   <Link className="button primary" href="/verify">Verify this file</Link>
   <Link className="button darkButton" href={`/api/records/${id}/credentials`}>VC export</Link>
   <Link className="button darkButton" href={`/api/records/${id}/c2pa`}>C2PA mapping</Link>
+  {data.status !== "revoked" && (
+    <Link className="button darkButton" href={`/dispute/${id}`}>
+      Challenge provenance
+    </Link>
+  )}
 </div>
 ```
 
-insert:
+## Record status constraint
 
-```tsx
-<RevokeRecord recordId={id} status={data.status} />
-```
+If `hps_records.status` is protected by a PostgreSQL CHECK constraint that only
+allows older values such as `active`, `revoked`, and `superseded`, update that
+constraint to include `under_review` before using this workflow.
 
-## Result
+Because the original base migration that created `hps_records` may differ from
+the currently visible migration set, inspect the existing constraint in Supabase
+before changing it. Do not blindly drop a constraint whose exact name you have
+not confirmed.
 
-When a signed-in owner or authorized institutional issuer views an active record,
-they will see **Record controls**. Opening it presents a revocation warning, reason
-field, explicit acknowledgement, and **Revoke record** action.
+## Admin access
 
-After revocation the page reloads. Your existing public record page already renders:
+The review API uses:
 
-`REVOKED · <reason>`
+`HPS_ADMIN_EMAILS`
 
-and stops displaying the valid provenance trust mark because `active` is false.
+Your existing HPS deployment already uses this environment variable for HPS
+administrator access. Keep that server-side only.
 
-## Important semantics
+Admin review page:
 
-Revocation must never delete a provenance record. It changes its status while
-preserving the record and reason as part of the provenance history.
+`/hps-admin/disputes`
+
+## Why this is safer than automatic "disputed"
+
+Any authenticated person can make an allegation. HPS should not present an
+allegation as a verified fact. Therefore:
+
+- `open` = challenge received privately
+- `under_review` = HPS accepted it for formal review
+- `resolved_no_issue` = no material issue established
+- `misrepresentation_found` = review found material misrepresentation and the
+  record is revoked
+
+The original signed manifest is never edited.
