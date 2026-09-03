@@ -35,7 +35,9 @@ export default function RevokeRecord({
     }
 
     if (!confirmed) {
-      setMessage("Confirm that you understand the record will remain publicly visible as revoked.");
+      setMessage(
+        "Confirm that you understand the record will remain publicly visible as revoked."
+      );
       return;
     }
 
@@ -92,10 +94,18 @@ export default function RevokeRecord({
       >
         <span>
           <strong style={{ display: "block" }}>Record controls</strong>
-          <span style={{ display: "block", opacity: 0.62, marginTop: 3, fontSize: 13 }}>
+          <span
+            style={{
+              display: "block",
+              opacity: 0.62,
+              marginTop: 3,
+              fontSize: 13,
+            }}
+          >
             Available to the record owner or an authorized institutional issuer.
           </span>
         </span>
+
         <span style={{ opacity: 0.6 }}>{open ? "−" : "+"}</span>
       </button>
 
@@ -110,7 +120,9 @@ export default function RevokeRecord({
             REVOCATION
           </p>
 
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Revoke this provenance record</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+            Revoke this provenance record
+          </h3>
 
           <p style={{ opacity: 0.72, lineHeight: 1.6, marginTop: 0 }}>
             Revocation does not delete the HPS record. The record remains publicly
@@ -120,6 +132,7 @@ export default function RevokeRecord({
 
           <div className="field" style={{ marginTop: 18 }}>
             <label>Reason for revocation</label>
+
             <textarea
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -151,6 +164,7 @@ export default function RevokeRecord({
               onChange={(event) => setConfirmed(event.target.checked)}
               style={{ marginTop: 3 }}
             />
+
             <span>
               I understand that this action changes the record to revoked and that
               its public provenance history will remain visible.
@@ -171,7 +185,8 @@ export default function RevokeRecord({
               className="button darkButton"
               style={{
                 borderColor: "rgba(150, 35, 35, .48)",
-                opacity: busy || !confirmed || reason.trim().length < 5 ? 0.55 : 1,
+                opacity:
+                  busy || !confirmed || reason.trim().length < 5 ? 0.55 : 1,
               }}
             >
               {busy ? "Revoking…" : "Revoke record"}
