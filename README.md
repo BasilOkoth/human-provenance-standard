@@ -1,86 +1,77 @@
-# HPS Institutional Batch v1
+# HPS Revocation UI
 
-This adds a real cryptographically verifiable batch object above individual institutional HPS records.
+The repository already contains a working revocation API at:
 
-## Install order
+`src/app/api/records/[id]/revoke/route.ts`
 
-1. Run `supabase/migrations/20260903_140_institutional_batches.sql` in Supabase.
-2. Add `src/app/api/organizations/[id]/batches/route.ts`.
-3. Add `src/app/api/batches/[id]/route.ts`.
-4. Add `src/app/batches/[id]/page.tsx`.
-5. Update your bulk issuance page so that after individual records finish, it creates and signs one batch claim and POSTs it to `/api/organizations/${id}/batches`.
+This package adds the missing user-facing record control and hardens the API.
 
-## Batch security semantics
+## 1. Add the client component
 
-`Batch integrity: valid` means all of the following:
-- the stored batch claim still hashes to the stored SHA-256 batch digest;
-- the institution's authorized Ed25519 issuer key verifies the signed batch claim;
-- the HPS Registry Ed25519 key verifies the registry envelope;
-- the batch is not void.
+Create:
 
-The batch does not replace individual HPS records.
+`src/components/RevokeRecord.tsx`
 
-## Client finalization snippet
+using the supplied `RevokeRecord.tsx`.
 
-After your bulk issuance loop has produced final item results, construct:
+## 2. Replace the revoke API
 
-```ts
-const batchId = `HPS-BATCH-${new Date().getUTCFullYear()}-${crypto
-  .randomUUID()
-  .replaceAll("-", "")
-  .slice(0, 10)
-  .toUpperCase()}`;
+Replace:
 
-const batchItems = finalItems.map(item => ({
-  fileName: item.fileName,
-  assetHash: item.hash,
-  status:
-    item.status === "issued"
-      ? "issued"
-      : item.status === "same_org" || item.status === "other_org"
-      ? "duplicate"
-      : "failed",
-  hpsId: item.hpsId || undefined,
-  message: item.message || undefined
-}));
+`src/app/api/records/[id]/revoke/route.ts`
 
-const batchClaim = {
-  version: "hps-institution-batch-1" as const,
-  batchId,
-  organizationId: id,
-  organizationName: org.name,
-  issuerPublicKey: pk,
-  issuerKeyId: keyId,
-  submittedCount: batchItems.length,
-  issuedCount: batchItems.filter(x => x.status === "issued").length,
-  duplicateCount: batchItems.filter(x => x.status === "duplicate").length,
-  failedCount: batchItems.filter(x => x.status === "failed").length,
-  items: batchItems,
-  createdAt: new Date().toISOString()
-};
+with the supplied `route.ts`.
 
-const signedBatch = await signIssuerClaim(id, batchClaim, pass);
+The updated route:
+- requires authentication
+- requires a meaningful reason
+- permits the creator/record owner
+- permits active institutional `admin` or `issuer`
+- only revokes active records
+- prevents repeated revocation
+- preserves the record and returns revocation metadata
 
-const batchResponse = await fetch(`/api/organizations/${id}/batches`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    batchClaim,
-    institutionSignature: signedBatch.signature
-  })
-});
+## 3. Add it to the public record page
 
-const batchData = await batchResponse.json();
+In:
 
-if (!batchResponse.ok) {
-  throw new Error(batchData.error || "Unable to create batch record.");
-}
+`src/app/records/[id]/page.tsx`
 
-// batchData.id is the new HPS-BATCH-...
+add this import near the top:
+
+```tsx
+import RevokeRecord from "@/components/RevokeRecord";
 ```
 
-Then link the user to:
+Then, immediately after the existing action buttons block:
 
-`/batches/${batchData.id}`
+```tsx
+<div className="actions">
+  <Link className="button primary" href="/verify">Verify this file</Link>
+  <Link className="button darkButton" href={`/api/records/${id}/credentials`}>VC export</Link>
+  <Link className="button darkButton" href={`/api/records/${id}/c2pa`}>C2PA mapping</Link>
+</div>
+```
 
-Important: keep the issuer passphrase in memory until both the individual records and the batch claim have been signed. Clear it only after the batch is finalized.
+insert:
+
+```tsx
+<RevokeRecord recordId={id} status={data.status} />
+```
+
+## Result
+
+When a signed-in owner or authorized institutional issuer views an active record,
+they will see **Record controls**. Opening it presents a revocation warning, reason
+field, explicit acknowledgement, and **Revoke record** action.
+
+After revocation the page reloads. Your existing public record page already renders:
+
+`REVOKED · <reason>`
+
+and stops displaying the valid provenance trust mark because `active` is false.
+
+## Important semantics
+
+Revocation must never delete a provenance record. It changes its status while
+preserving the record and reason as part of the provenance history.
