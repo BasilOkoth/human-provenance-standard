@@ -281,7 +281,7 @@ export default function Page({
 
       setMsg(
         supersededMatches.length
-          ? "Lifecycle warning: this exact file matches a SUPERSEDED HPS record from another institution. The historical record remains verifiable, but it has been replaced. Review the record lifecycle before declaring a relationship."
+          ? ""
           : "This exact file is already registered by another institution. Review the existing record and declare the relationship before issuing."
       );
       return;
@@ -937,163 +937,225 @@ export default function Page({
           {dups.length > 0 && (
             <>
               <div className="sectionLabel">
-                04 · Existing asset relationship
+                03 · Existing asset relationship
               </div>
 
-              {dups.some((d: any) => d.status === "superseded") && (
-                <div className="field full">
+              <div className="field full">
+                <div
+                  style={{
+                    border: "1px solid rgba(127,127,127,.18)",
+                    borderRadius: 16,
+                    padding: 16,
+                    background: "rgba(127,127,127,.025)"
+                  }}
+                >
+                  {dups.some((d: any) => d.status === "superseded") && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        marginBottom: 14,
+                        paddingBottom: 14,
+                        borderBottom: "1px solid rgba(127,127,127,.14)"
+                      }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 26,
+                          height: 26,
+                          flex: "0 0 auto",
+                          display: "grid",
+                          placeItems: "center",
+                          borderRadius: "50%",
+                          border: "1px solid rgba(160,112,26,.30)",
+                          background: "rgba(160,112,26,.08)",
+                          fontWeight: 800,
+                          fontSize: 12
+                        }}
+                      >
+                        !
+                      </span>
+
+                      <div>
+                        <strong style={{ display: "block", marginBottom: 3 }}>
+                          Superseded provenance detected
+                        </strong>
+                        <p
+                          className="muted"
+                          style={{
+                            margin: 0,
+                            maxWidth: 760,
+                            lineHeight: 1.5,
+                            fontSize: 13
+                          }}
+                        >
+                          This exact asset matches a historical HPS record that
+                          has been formally replaced. Review the replacement
+                          before declaring this institution&apos;s relationship.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {dups.map((d: any) => {
+                      const selected = relatedRecordId === d.id;
+                      const superseded = d.status === "superseded";
+
+                      return (
+                        <div
+                          key={d.id}
+                          style={{
+                            border: selected
+                              ? "1px solid rgba(35,95,72,.32)"
+                              : "1px solid rgba(127,127,127,.14)",
+                            borderRadius: 12,
+                            padding: 13,
+                            background: selected
+                              ? "rgba(35,95,72,.035)"
+                              : "transparent"
+                          }}
+                        >
+                          <label
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: 10,
+                              cursor: "pointer"
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              checked={selected}
+                              onChange={() => setRelatedRecordId(d.id)}
+                              style={{ marginTop: 4 }}
+                            />
+
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  flexWrap: "wrap"
+                                }}
+                              >
+                                <strong>
+                                  {d.title || d.id}
+                                </strong>
+
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    padding: "4px 8px",
+                                    borderRadius: 999,
+                                    fontSize: 10,
+                                    fontWeight: 800,
+                                    letterSpacing: ".07em",
+                                    textTransform: "uppercase",
+                                    border: superseded
+                                      ? "1px solid rgba(160,112,26,.28)"
+                                      : "1px solid rgba(35,95,72,.22)",
+                                    background: superseded
+                                      ? "rgba(160,112,26,.07)"
+                                      : "rgba(35,95,72,.06)"
+                                  }}
+                                >
+                                  {superseded ? "Superseded" : "Active"}
+                                </span>
+                              </div>
+
+                              <div
+                                className="muted"
+                                style={{
+                                  marginTop: 4,
+                                  fontSize: 12.5,
+                                  lineHeight: 1.45
+                                }}
+                              >
+                                {d.id}
+                                {d.creator_name ? ` · ${d.creator_name}` : ""}
+                                {d.version ? ` · Version ${d.version}` : ""}
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  gap: 12,
+                                  marginTop: 8,
+                                  fontSize: 12.5
+                                }}
+                              >
+                                <Link
+                                  href={`/records/${d.id}`}
+                                  target="_blank"
+                                >
+                                  View record →
+                                </Link>
+
+                                {superseded && d.superseded_by_id && (
+                                  <Link
+                                    href={`/records/${d.superseded_by_id}`}
+                                    target="_blank"
+                                  >
+                                    View current replacement →
+                                  </Link>
+                                )}
+                              </div>
+                            </div>
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+
                   <div
-                    className="notice"
                     style={{
-                      borderColor: "rgba(160, 112, 26, .28)",
-                      background: "rgba(160, 112, 26, .06)"
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: "1px solid rgba(127,127,127,.14)"
                     }}
                   >
-                    <strong>Superseded provenance detected</strong>
-                    <p>
-                      This exact asset matches an HPS record that the original
-                      institution has formally replaced. The historical record
-                      remains cryptographically verifiable, but it is no longer
-                      that institution&apos;s current version. Review the
-                      replacement before declaring how this institution relates
-                      to the historical asset.
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: 6,
+                        fontWeight: 700
+                      }}
+                    >
+                      Declare relationship
+                    </label>
+
+                    <select
+                      value={relationshipType}
+                      onChange={e => setRelationshipType(e.target.value)}
+                      style={{ maxWidth: 360 }}
+                    >
+                      <option value="">Choose relationship…</option>
+                      <option value="co_issuer">Co-issuer</option>
+                      <option value="co_signatory">Co-signatory</option>
+                      <option value="attestor">Attestor</option>
+                      <option value="endorser">Endorser</option>
+                    </select>
+
+                    <p
+                      className="muted"
+                      style={{
+                        marginTop: 7,
+                        marginBottom: 0,
+                        fontSize: 12.5
+                      }}
+                    >
+                      This declaration links the new institutional record to the
+                      selected existing HPS provenance.
                     </p>
                   </div>
                 </div>
-              )}
-
-              <div className="field full">
-                <div style={{ display: "grid", gap: 10 }}>
-                  {dups.map((d: any) => {
-                    const selected = relatedRecordId === d.id;
-                    const superseded = d.status === "superseded";
-
-                    return (
-                      <label
-                        key={d.id}
-                        style={{
-                          display: "block",
-                          padding: 16,
-                          borderRadius: 14,
-                          cursor: "pointer",
-                          border: selected
-                            ? "1px solid rgba(35,95,72,.38)"
-                            : "1px solid rgba(127,127,127,.18)",
-                          background: selected
-                            ? "rgba(35,95,72,.045)"
-                            : "rgba(127,127,127,.025)"
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 12
-                          }}
-                        >
-                          <input
-                            type="radio"
-                            checked={selected}
-                            onChange={() => setRelatedRecordId(d.id)}
-                            style={{ marginTop: 4 }}
-                          />
-
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                gap: 12,
-                                alignItems: "center",
-                                flexWrap: "wrap"
-                              }}
-                            >
-                              <strong>{d.title || d.id}</strong>
-
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  padding: "5px 9px",
-                                  borderRadius: 999,
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  letterSpacing: ".08em",
-                                  textTransform: "uppercase",
-                                  border: superseded
-                                    ? "1px solid rgba(160,112,26,.32)"
-                                    : "1px solid rgba(35,95,72,.24)",
-                                  background: superseded
-                                    ? "rgba(160,112,26,.08)"
-                                    : "rgba(35,95,72,.07)"
-                                }}
-                              >
-                                {superseded ? "Superseded" : "Active"}
-                              </span>
-                            </div>
-
-                            <div
-                              className="muted"
-                              style={{ marginTop: 6, fontSize: 13 }}
-                            >
-                              {d.id}
-                              {d.creator_name ? ` · ${d.creator_name}` : ""}
-                              {d.version ? ` · Version ${d.version}` : ""}
-                            </div>
-
-                            {superseded && (
-                              <div
-                                style={{
-                                  marginTop: 10,
-                                  fontSize: 13,
-                                  lineHeight: 1.5
-                                }}
-                              >
-                                This is a historical HPS record and has been
-                                replaced.
-                                {d.superseded_by_id ? (
-                                  <>
-                                    {" "}
-                                    <Link
-                                      href={`/records/${d.superseded_by_id}`}
-                                      target="_blank"
-                                    >
-                                      View current replacement →
-                                    </Link>
-                                  </>
-                                ) : null}
-                              </div>
-                            )}
-
-                            <div style={{ marginTop: 8 }}>
-                              <Link
-                                href={`/records/${d.id}`}
-                                target="_blank"
-                                onClick={event => event.stopPropagation()}
-                              >
-                                View matching HPS record →
-                              </Link>
-                            </div>
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="field">
-                <label>Relationship</label>
-                <select
-                  value={relationshipType}
-                  onChange={e => setRelationshipType(e.target.value)}
-                >
-                  <option value="">Choose relationship…</option>
-                  <option value="co_issuer">Co-issuer</option>
-                  <option value="co_signatory">Co-signatory</option>
-                  <option value="attestor">Attestor</option>
-                  <option value="endorser">Endorser</option>
-                </select>
               </div>
             </>
           )}
