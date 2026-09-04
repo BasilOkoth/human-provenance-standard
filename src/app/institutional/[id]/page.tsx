@@ -940,11 +940,11 @@ export default function Page({
                 03 · Existing asset relationship
               </div>
 
-              <div className="field full">
+              <div style={{ gridColumn: "1 / -1" }}>
                 <div
                   style={{
                     border: "1px solid rgba(127,127,127,.18)",
-                    borderRadius: 16,
+                    borderRadius: 14,
                     padding: 16,
                     background: "rgba(127,127,127,.025)"
                   }}
@@ -955,17 +955,17 @@ export default function Page({
                         display: "flex",
                         alignItems: "flex-start",
                         gap: 10,
-                        marginBottom: 14,
-                        paddingBottom: 14,
+                        paddingBottom: 13,
+                        marginBottom: 13,
                         borderBottom: "1px solid rgba(127,127,127,.14)"
                       }}
                     >
                       <span
                         aria-hidden="true"
                         style={{
-                          width: 26,
-                          height: 26,
-                          flex: "0 0 auto",
+                          width: 24,
+                          height: 24,
+                          minWidth: 24,
                           display: "grid",
                           placeItems: "center",
                           borderRadius: "50%",
@@ -978,16 +978,16 @@ export default function Page({
                         !
                       </span>
 
-                      <div>
+                      <div style={{ minWidth: 0 }}>
                         <strong style={{ display: "block", marginBottom: 3 }}>
                           Superseded provenance detected
                         </strong>
                         <p
-                          className="muted"
                           style={{
                             margin: 0,
                             maxWidth: 760,
-                            lineHeight: 1.5,
+                            color: "#82796e",
+                            lineHeight: 1.45,
                             fontSize: 13
                           }}
                         >
@@ -999,7 +999,7 @@ export default function Page({
                     </div>
                   )}
 
-                  <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 9 }}>
                     {dups.map((d: any) => {
                       const selected = relatedRecordId === d.id;
                       const superseded = d.status === "superseded";
@@ -1011,70 +1011,60 @@ export default function Page({
                             border: selected
                               ? "1px solid rgba(35,95,72,.32)"
                               : "1px solid rgba(127,127,127,.14)",
-                            borderRadius: 12,
-                            padding: 13,
+                            borderRadius: 11,
+                            padding: 12,
                             background: selected
                               ? "rgba(35,95,72,.035)"
-                              : "transparent"
+                              : "#fff"
                           }}
                         >
-                          <label
+                          <div
                             style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 10,
-                              cursor: "pointer"
+                              display: "grid",
+                              gridTemplateColumns: "18px minmax(0,1fr) auto",
+                              gap: 11,
+                              alignItems: "start"
                             }}
                           >
                             <input
                               type="radio"
+                              aria-label={`Select ${d.id}`}
                               checked={selected}
                               onChange={() => setRelatedRecordId(d.id)}
-                              style={{ marginTop: 4 }}
+                              style={{
+                                width: 16,
+                                height: 16,
+                                minWidth: 16,
+                                margin: "3px 0 0",
+                                padding: 0,
+                                cursor: "pointer"
+                              }}
                             />
 
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
+                            <div style={{ minWidth: 0 }}>
+                              <label
+                                onClick={() => setRelatedRecordId(d.id)}
                                 style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 10,
-                                  flexWrap: "wrap"
+                                  display: "block",
+                                  margin: 0,
+                                  color: "#111",
+                                  fontSize: 14,
+                                  fontWeight: 700,
+                                  letterSpacing: 0,
+                                  textTransform: "none",
+                                  cursor: "pointer"
                                 }}
                               >
-                                <strong>
-                                  {d.title || d.id}
-                                </strong>
-
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    padding: "4px 8px",
-                                    borderRadius: 999,
-                                    fontSize: 10,
-                                    fontWeight: 800,
-                                    letterSpacing: ".07em",
-                                    textTransform: "uppercase",
-                                    border: superseded
-                                      ? "1px solid rgba(160,112,26,.28)"
-                                      : "1px solid rgba(35,95,72,.22)",
-                                    background: superseded
-                                      ? "rgba(160,112,26,.07)"
-                                      : "rgba(35,95,72,.06)"
-                                  }}
-                                >
-                                  {superseded ? "Superseded" : "Active"}
-                                </span>
-                              </div>
+                                {d.title || d.id}
+                              </label>
 
                               <div
-                                className="muted"
                                 style={{
                                   marginTop: 4,
+                                  color: "#82796e",
                                   fontSize: 12.5,
-                                  lineHeight: 1.45
+                                  lineHeight: 1.4,
+                                  overflowWrap: "anywhere"
                                 }}
                               >
                                 {d.id}
@@ -1086,15 +1076,12 @@ export default function Page({
                                 style={{
                                   display: "flex",
                                   flexWrap: "wrap",
-                                  gap: 12,
-                                  marginTop: 8,
+                                  gap: "6px 14px",
+                                  marginTop: 7,
                                   fontSize: 12.5
                                 }}
                               >
-                                <Link
-                                  href={`/records/${d.id}`}
-                                  target="_blank"
-                                >
+                                <Link href={`/records/${d.id}`} target="_blank">
                                   View record →
                                 </Link>
 
@@ -1108,7 +1095,29 @@ export default function Page({
                                 )}
                               </div>
                             </div>
-                          </label>
+
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                whiteSpace: "nowrap",
+                                padding: "4px 8px",
+                                borderRadius: 999,
+                                fontSize: 9.5,
+                                fontWeight: 800,
+                                letterSpacing: ".07em",
+                                textTransform: "uppercase",
+                                border: superseded
+                                  ? "1px solid rgba(160,112,26,.28)"
+                                  : "1px solid rgba(35,95,72,.22)",
+                                background: superseded
+                                  ? "rgba(160,112,26,.07)"
+                                  : "rgba(35,95,72,.06)"
+                              }}
+                            >
+                              {superseded ? "Superseded" : "Active"}
+                            </span>
+                          </div>
                         </div>
                       );
                     })}
@@ -1116,25 +1125,43 @@ export default function Page({
 
                   <div
                     style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                      gap: 16,
+                      alignItems: "end",
                       marginTop: 14,
                       paddingTop: 14,
                       borderTop: "1px solid rgba(127,127,127,.14)"
                     }}
                   >
-                    <label
-                      style={{
-                        display: "block",
-                        marginBottom: 6,
-                        fontWeight: 700
-                      }}
-                    >
-                      Declare relationship
-                    </label>
+                    <div>
+                      <div
+                        style={{
+                          marginBottom: 6,
+                          color: "#80766a",
+                          fontSize: 10.5,
+                          fontWeight: 750,
+                          letterSpacing: ".1em",
+                          textTransform: "uppercase"
+                        }}
+                      >
+                        Declaration
+                      </div>
+                      <div style={{ fontSize: 13, lineHeight: 1.4 }}>
+                        How does {org.name} relate to this exact asset?
+                      </div>
+                    </div>
 
                     <select
                       value={relationshipType}
                       onChange={e => setRelationshipType(e.target.value)}
-                      style={{ maxWidth: 360 }}
+                      style={{
+                        width: "100%",
+                        padding: 11,
+                        border: "1px solid #d1c8bb",
+                        background: "#fbfaf7",
+                        font: "inherit"
+                      }}
                     >
                       <option value="">Choose relationship…</option>
                       <option value="co_issuer">Co-issuer</option>
@@ -1142,18 +1169,6 @@ export default function Page({
                       <option value="attestor">Attestor</option>
                       <option value="endorser">Endorser</option>
                     </select>
-
-                    <p
-                      className="muted"
-                      style={{
-                        marginTop: 7,
-                        marginBottom: 0,
-                        fontSize: 12.5
-                      }}
-                    >
-                      This declaration links the new institutional record to the
-                      selected existing HPS provenance.
-                    </p>
                   </div>
                 </div>
               </div>
