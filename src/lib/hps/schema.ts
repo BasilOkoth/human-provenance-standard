@@ -29,28 +29,46 @@ export const AssetFingerprintSchema = z.object({
   fileName: z.string().max(500).optional(),
   byteLength: z.number().int().nonnegative(),
   modality: z.enum(["text", "visual", "text_visual", "binary"]),
-  canonicalTextSha256: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/i)
-    .nullable()
-    .optional(),
+  canonicalTextSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
   canonicalTextLength: z.number().int().nonnegative().nullable().optional(),
-  textSimHash64: z
-    .string()
-    .regex(/^[a-f0-9]{16}$/i)
-    .nullable()
-    .optional(),
+  textSimHash64: z.string().regex(/^[a-f0-9]{16}$/i).nullable().optional(),
+
+  // HPS cross-format / OCR layer. All fields are supporting evidence; SHA-256
+  // remains the exact-file identity.
+  contentCanonicalSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+  contentSimHash64: z.string().regex(/^[a-f0-9]{16}$/i).nullable().optional(),
+  structureSimHash64: z.string().regex(/^[a-f0-9]{16}$/i).nullable().optional(),
+  textSource: z.enum(["embedded", "ocr", "mixed", "extracted", "plain", "none"]).optional(),
+  ocr: z.object({
+    used: z.boolean(),
+    engine: z.literal("tesseract.js"),
+    language: z.string().min(2).max(80),
+    averageConfidence: z.number().min(0).max(100).nullable(),
+    pagesProcessed: z.number().int().nonnegative(),
+    pageNumbers: z.array(z.number().int().positive()).max(80)
+  }).nullable().optional(),
+  documentStructure: z.object({
+    lineCount: z.number().int().nonnegative(),
+    wordCount: z.number().int().nonnegative(),
+    numericTokenCount: z.number().int().nonnegative(),
+    dateLikeCount: z.number().int().nonnegative(),
+    identifierLikeCount: z.number().int().nonnegative(),
+    uppercaseLineCount: z.number().int().nonnegative()
+  }).nullable().optional(),
+
   pageCount: z.number().int().positive().nullable().optional(),
-  visualPHashes: z
-    .array(z.string().regex(/^[a-f0-9]{16}$/i))
-    .optional(),
-  visualDHashes: z
-    .array(z.string().regex(/^[a-f0-9]{16}$/i))
-    .optional(),
+  visualPHashes: z.array(z.string().regex(/^[a-f0-9]{16}$/i)).optional(),
+  visualDHashes: z.array(z.string().regex(/^[a-f0-9]{16}$/i)).optional(),
   visualPageIndexes: z.array(z.number().int().positive()).optional(),
   visualCoverage: z.number().min(0).max(1).nullable().optional(),
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
+  markSignals: z.object({
+    detector: z.literal("hps-document-marks-1"),
+    signatureLikelihood: z.number().min(0).max(1),
+    stampLikelihood: z.number().min(0).max(1),
+    note: z.string().max(500)
+  }).nullable().optional(),
   warnings: z.array(z.string().max(500)).optional()
 });
 
@@ -73,13 +91,8 @@ const SignatureSchema = z.object({
   value: z.string()
 });
 
-/* -------------------------------------------------------
- * Creator supporting evidence
- * ----------------------------------------------------- */
-
 export const CreatorEvidenceSchema = z.object({
   id: z.string().min(4).max(120),
-
   type: z.enum([
     "draft",
     "source_code",
@@ -92,392 +105,134 @@ export const CreatorEvidenceSchema = z.object({
     "ai_interaction",
     "other"
   ]),
-
-  visibility: z
-    .enum(["hashed", "sealed"])
-    .default("sealed"),
-
+  visibility: z.enum(["hashed", "sealed"]).default("sealed"),
   fileName: z.string().min(1).max(500),
-
-  sha256: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/i),
-
-  note: z
-    .string()
-    .max(1000)
-    .optional()
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  note: z.string().max(1000).optional()
 });
-
-/* -------------------------------------------------------
- * Creator declaration
- * ----------------------------------------------------- */
 
 export const CreatorDeclarationSchema = z.object({
   version: z.literal("hps-creator-declaration-1"),
-
   accepted: z.literal(true),
-
   statement: z.literal(
     "I declare that the provenance and contribution information I have provided is accurate to the best of my knowledge. I understand that materially false or misleading claims may cause this HPS record to be disputed, suspended or revoked."
   ),
-
   acceptedAt: z.string().datetime()
 });
 
-/* -------------------------------------------------------
- * Creator claim
- * ----------------------------------------------------- */
-
 export const CreatorClaimSchema = z.object({
   title: z.string().min(1).max(240),
-
   creatorName: z.string().min(1).max(240),
-
   workType: z.string().min(1).max(100),
-
   fileName: z.string().max(500).optional(),
-
-  assetHash: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/i),
-
-  assetFingerprint:
-    AssetFingerprintSchema.optional(),
-
-  contributionTypes: z
-    .array(z.enum(contributionTypes))
-    .min(1),
-
+  assetHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  assetFingerprint: AssetFingerprintSchema.optional(),
+  contributionTypes: z.array(z.enum(contributionTypes)).min(1),
   aiUsed: z.boolean(),
-
-  primaryTool: z
-    .string()
-    .max(200)
-    .nullable()
-    .optional(),
-
-  processNoteHash: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/i)
-    .nullable()
-    .optional(),
-
-  /* NEW */
-  supportingEvidence: z
-    .array(CreatorEvidenceSchema)
-    .max(20)
-    .default([]),
-
-  /* NEW */
-  declaration:
-    CreatorDeclarationSchema,
-
-  creatorPublicKey: z
-    .string()
-    .min(20),
-
-  parentRecordId: z
-    .string()
-    .nullable()
-    .optional(),
-
-  issuedAt: z
-    .string()
-    .datetime()
+  primaryTool: z.string().max(200).nullable().optional(),
+  processNoteHash: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+  supportingEvidence: z.array(CreatorEvidenceSchema).max(20).default([]),
+  declaration: CreatorDeclarationSchema,
+  creatorPublicKey: z.string().min(20),
+  parentRecordId: z.string().nullable().optional(),
+  issuedAt: z.string().datetime()
 });
-
-/* -------------------------------------------------------
- * Institutional claim
- * ----------------------------------------------------- */
 
 export const InstitutionClaimSchema = z.object({
   organizationId: z.string().uuid(),
-
-  organizationName: z
-    .string()
-    .min(2)
-    .max(300),
-
-  documentType: z
-    .string()
-    .min(1)
-    .max(120),
-
-  title: z
-    .string()
-    .min(1)
-    .max(240),
-
-  subjectName: z
-    .string()
-    .max(240)
-    .optional(),
-
-  fileName: z
-    .string()
-    .max(500)
-    .optional(),
-
-  assetHash: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/i),
-
-  assetFingerprint:
-    AssetFingerprintSchema.optional(),
-
-  issuerPublicKey: z
-    .string()
-    .min(20),
-
-  issuerKeyId: z
-    .string()
-    .uuid(),
-
-  parentRecordId: z
-    .string()
-    .nullable()
-    .optional(),
-
-  issuedAt: z
-    .string()
-    .datetime()
+  organizationName: z.string().min(2).max(300),
+  documentType: z.string().min(1).max(120),
+  title: z.string().min(1).max(240),
+  subjectName: z.string().max(240).optional(),
+  fileName: z.string().max(500).optional(),
+  assetHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  assetFingerprint: AssetFingerprintSchema.optional(),
+  issuerPublicKey: z.string().min(20),
+  issuerKeyId: z.string().uuid(),
+  parentRecordId: z.string().nullable().optional(),
+  issuedAt: z.string().datetime()
 });
-
-/* -------------------------------------------------------
- * HPS manifest
- * ----------------------------------------------------- */
 
 export const HPSManifestSchema = z.object({
   hpsVersion: z.enum(["0.4", "1.0"]),
-
   id: z.string().min(8),
-
   work: z.object({
     title: z.string().min(1),
-
     type: z.string().min(1),
-
-    createdAt: z
-      .string()
-      .datetime(),
-
-    version: z
-      .number()
-      .int()
-      .positive(),
-
-    sha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/i),
-
-    fileName: z
-      .string()
-      .optional(),
-
-    fingerprint:
-      AssetFingerprintSchema.optional()
+    createdAt: z.string().datetime(),
+    version: z.number().int().positive(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    fileName: z.string().optional(),
+    fingerprint: AssetFingerprintSchema.optional()
   }),
-
-  actors: z
-    .array(
-      z.object({
-        id: z.string(),
-
-        name: z.string(),
-
-        role: z.string(),
-
-        publicKey: z
-          .string()
-          .optional(),
-
-        identityAssurance:
-          IdentityAssuranceSchema,
-
-        organizationId: z
-          .string()
-          .uuid()
-          .optional()
-      })
-    )
-    .min(1),
-
-  contributions: z
-    .array(
-      z.object({
-        actorId: z.string(),
-
-        type: z.enum(contributionTypes),
-
-        origin: z.enum([
-          "human",
-          "ai_assisted",
-          "automated"
-        ]),
-
-        description: z
-          .string()
-          .min(3),
-
-        evidenceIds: z
-          .array(z.string())
-          .default([]),
-
-        confidence: z
-          .enum([
-            "self_declared",
-            "evidence_backed",
-            "third_party_attested"
-          ])
-          .default("self_declared")
-      })
-    )
-    .default([]),
-
-  tools: z
-    .array(
-      z.object({
-        name: z.string(),
-
-        role: z.string(),
-
-        generativeAI: z.boolean(),
-
-        scope: z
-          .string()
-          .optional(),
-
-        humanOversight: z
-          .enum([
-            "none",
-            "low",
-            "medium",
-            "high"
-          ])
-          .optional()
-      })
-    )
-    .default([]),
-
-  evidence: z
-    .array(
-      z.object({
-        id: z.string(),
-
-        type: z.string(),
-
-        visibility: z.enum([
-          "public",
-          "hashed",
-          "sealed"
-        ]),
-
-        sha256: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/i),
-
-        note: z
-          .string()
-          .optional()
-      })
-    )
-    .default([]),
-
+  actors: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    role: z.string(),
+    publicKey: z.string().optional(),
+    identityAssurance: IdentityAssuranceSchema,
+    organizationId: z.string().uuid().optional()
+  })).min(1),
+  contributions: z.array(z.object({
+    actorId: z.string(),
+    type: z.enum(contributionTypes),
+    origin: z.enum(["human", "ai_assisted", "automated"]),
+    description: z.string().min(3),
+    evidenceIds: z.array(z.string()).default([]),
+    confidence: z.enum([
+      "self_declared",
+      "evidence_backed",
+      "third_party_attested"
+    ]).default("self_declared")
+  })).default([]),
+  tools: z.array(z.object({
+    name: z.string(),
+    role: z.string(),
+    generativeAI: z.boolean(),
+    scope: z.string().optional(),
+    humanOversight: z.enum(["none", "low", "medium", "high"]).optional()
+  })).default([]),
+  evidence: z.array(z.object({
+    id: z.string(),
+    type: z.string(),
+    visibility: z.enum(["public", "hashed", "sealed"]),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    note: z.string().optional()
+  })).default([]),
   responsibility: z.object({
     finalApprovalActorId: z.string(),
-
-    statement: z
-      .string()
-      .min(10)
+    statement: z.string().min(10)
   }),
-
-  issuedAt: z
-    .string()
-    .datetime(),
-
-  creatorClaim:
-    CreatorClaimSchema.optional(),
-
-  creatorSignature:
-    SignatureSchema.optional(),
-
-  institutionalClaim:
-    InstitutionClaimSchema.optional(),
-
-  institutionSignature:
-    SignatureSchema.optional(),
-
-  registry: z
-    .object({
-      name: z.string(),
-
-      publicKey: z.string(),
-
-      signedAt: z
-        .string()
-        .datetime(),
-
-      keyId: z
-        .string()
-        .optional()
-    })
-    .optional(),
-
-  registrySignature:
-    SignatureSchema
-      .omit({
-        publicKey: true
-      })
-      .optional(),
-
-  interoperability: z
-    .object({
-      c2pa: z
-        .object({
-          mappingVersion: z.string(),
-
-          status: z.enum([
-            "mapped",
-            "exportable",
-            "native"
-          ])
-        })
-        .optional(),
-
-      verifiableCredential: z
-        .object({
-          contextVersion: z.string(),
-
-          status: z.enum([
-            "exportable",
-            "issued"
-          ])
-        })
-        .optional()
-    })
-    .optional()
+  issuedAt: z.string().datetime(),
+  creatorClaim: CreatorClaimSchema.optional(),
+  creatorSignature: SignatureSchema.optional(),
+  institutionalClaim: InstitutionClaimSchema.optional(),
+  institutionSignature: SignatureSchema.optional(),
+  registry: z.object({
+    name: z.string(),
+    publicKey: z.string(),
+    signedAt: z.string().datetime(),
+    keyId: z.string().optional()
+  }).optional(),
+  registrySignature: SignatureSchema.omit({ publicKey: true }).optional(),
+  interoperability: z.object({
+    c2pa: z.object({
+      mappingVersion: z.string(),
+      status: z.enum(["mapped", "exportable", "native"])
+    }).optional(),
+    verifiableCredential: z.object({
+      contextVersion: z.string(),
+      status: z.enum(["exportable", "issued"])
+    }).optional()
+  }).optional()
 });
 
-export type HPSManifest =
-  z.infer<typeof HPSManifestSchema>;
-
-/* -------------------------------------------------------
- * API input schemas
- * ----------------------------------------------------- */
+export type HPSManifest = z.infer<typeof HPSManifestSchema>;
 
 export const CreateRecordSchema = z.object({
-  creatorClaim:
-    CreatorClaimSchema,
-
-  creatorSignature: z
-    .string()
-    .min(20),
-
-  processNote: z
-    .string()
-    .max(4000)
-    .optional()
+  creatorClaim: CreatorClaimSchema,
+  creatorSignature: z.string().min(20),
+  processNote: z.string().max(4000).optional()
 });
 
 export const AttestationSchema = z.object({
@@ -491,60 +246,24 @@ export const AttestationSchema = z.object({
     "document_validity",
     "other"
   ]),
-
-  statement: z
-    .string()
-    .min(10)
-    .max(3000),
-
-  institution: z
-    .string()
-    .max(300)
-    .optional(),
-
-  attestorPublicKey: z
-    .string()
-    .min(20),
-
-  attestorSignature: z
-    .string()
-    .min(20),
-
-  signedPayload: z
-    .string()
-    .min(20)
+  statement: z.string().min(10).max(3000),
+  institution: z.string().max(300).optional(),
+  attestorPublicKey: z.string().min(20),
+  attestorSignature: z.string().min(20),
+  signedPayload: z.string().min(20)
 });
 
 export const CreateOrganizationSchema = z.object({
-  name: z
-    .string()
-    .min(2)
-    .max(300),
-
-  slug: z
-    .string()
-    .regex(
-      /^[a-z0-9][a-z0-9-]{1,80}$/
-    )
+  name: z.string().min(2).max(300),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,80}$/)
 });
 
 export const RegisterIssuerKeySchema = z.object({
-  publicKey: z
-    .string()
-    .min(20),
-
-  label: z
-    .string()
-    .min(2)
-    .max(120)
-    .default("Primary issuer key")
+  publicKey: z.string().min(20),
+  label: z.string().min(2).max(120).default("Primary issuer key")
 });
 
 export const IssueInstitutionalRecordSchema = z.object({
-  institutionalClaim:
-    InstitutionClaimSchema,
-
-  institutionSignature: z
-    .string()
-    .min(20)
+  institutionalClaim: InstitutionClaimSchema,
+  institutionSignature: z.string().min(20)
 });

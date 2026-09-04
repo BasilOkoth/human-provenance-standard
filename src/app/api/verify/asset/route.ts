@@ -8,9 +8,10 @@ const priority: Record<string, number> = {
   exact_original: 0,
   registered_derivative: 1,
   verified_derivative: 2,
-  derivative_candidate: 3,
-  modified_derivative: 4,
-  unverified: 5,
+  cross_format_match: 3,
+  derivative_candidate: 4,
+  modified_derivative: 5,
+  unverified: 6,
 };
 
 function validateRecord(row: any) {
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminSupabase();
 
-    // 1) Exact original: cryptographic SHA-256 match remains the strongest result.
+    // 1) Exact original: SHA-256 is the strongest result.
     const { data: exactRows, error: exactError } = await admin
       .from("hps_records")
       .select("id,title,creator_name,record_kind,status,version,issuer_org_id,manifest,asset_fingerprint")
@@ -91,15 +92,19 @@ export async function POST(request: NextRequest) {
       const records = (exactRows || []).map(row => publicRecord(row, {
         verificationClass: row.status === "revoked" ? "revoked" : "exact_original",
         assurance: "cryptographic",
+        confidenceScore: 100,
+        confidenceBand: "very_high",
         comparison: {
           exactHashMatch: true,
+          canonicalTextMatch: null,
+          contentCanonicalMatch: null,
           reasons: ["The uploaded file is byte-for-byte identical to the registered SHA-256 asset."],
         },
       }));
       return NextResponse.json({ assetHash, match: true, matchMode: "exact", records });
     }
 
-    // 2) Explicit registered derivative: exact child hash mapped to a parent HPS record.
+    // 2) Explicit registered derivative.
     const { data: derivativeRows } = await admin
       .from("hps_registered_derivatives")
       .select("parent_record_id,transformation_type,comparison,assurance,registry_payload,registry_signature,registry_public_key,created_at")
@@ -125,6 +130,8 @@ export async function POST(request: NextRequest) {
         return [publicRecord(parent, {
           verificationClass: parent.status === "revoked" ? "revoked" : derivativeSignatureValid ? "registered_derivative" : "derivative_candidate",
           assurance: derivativeSignatureValid ? derivative.assurance : "none",
+          confidenceScore: derivative.comparison?.confidenceScore ?? null,
+          confidenceBand: derivative.comparison?.confidenceBand ?? null,
           transformationType: derivative.transformation_type,
           comparison: derivative.comparison,
           derivativeRegistrySignatureValid: derivativeSignatureValid,
@@ -136,32 +143,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 3) Compression-resilient comparison requires a v1 fingerprint.
     if (!candidate) {
       return NextResponse.json({ assetHash, match: false, matchMode: "none", records: [] });
     }
 
     const rowsById = new Map<string, any>();
+    const select = "id,title,creator_name,record_kind,status,version,issuer_org_id,manifest,asset_fingerprint,canonical_text_sha256,content_canonical_sha256";
 
-    // Strong candidate lookup: identical canonical text hash.
+    // Strong candidate lookup: strict canonical text.
     if (candidate.canonicalTextSha256) {
       const { data: textRows } = await admin
         .from("hps_records")
-        .select("id,title,creator_name,record_kind,status,version,issuer_org_id,manifest,asset_fingerprint,canonical_text_sha256")
+        .select(select)
         .eq("canonical_text_sha256", candidate.canonicalTextSha256)
         .not("asset_fingerprint", "is", null)
         .order("created_at", { ascending: false })
-        .limit(80);
+        .limit(100);
       (textRows || []).forEach((row: any) => rowsById.set(row.id, row));
     }
 
-    // Fallback pool for visually similar or modified derivatives.
+    // Cross-format lookup: representation-normalized content identity.
+    if (candidate.contentCanonicalSha256) {
+      const { data: contentRows } = await admin
+        .from("hps_records")
+        .select(select)
+        .eq("content_canonical_sha256", candidate.contentCanonicalSha256)
+        .not("asset_fingerprint", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      (contentRows || []).forEach((row: any) => rowsById.set(row.id, row));
+    }
+
+    // Bounded fallback pool for OCR errors, visual similarity and modified copies.
     const { data: recentRows } = await admin
       .from("hps_records")
-      .select("id,title,creator_name,record_kind,status,version,issuer_org_id,manifest,asset_fingerprint,canonical_text_sha256")
+      .select(select)
       .not("asset_fingerprint", "is", null)
       .order("created_at", { ascending: false })
-      .limit(250);
+      .limit(350);
     (recentRows || []).forEach((row: any) => rowsById.set(row.id, row));
 
     const compared = [...rowsById.values()]
@@ -173,6 +192,8 @@ export async function POST(request: NextRequest) {
         return [publicRecord(row, {
           verificationClass: row.status === "revoked" ? "revoked" : comparison.status,
           assurance: comparison.assurance,
+          confidenceScore: comparison.confidenceScore,
+          confidenceBand: comparison.confidenceBand,
           comparison,
         })];
       })
@@ -180,14 +201,14 @@ export async function POST(request: NextRequest) {
         const pa = priority[a.verificationClass] ?? 99;
         const pb = priority[b.verificationClass] ?? 99;
         if (pa !== pb) return pa - pb;
-        return (b.comparison?.visualSimilarity || 0) - (a.comparison?.visualSimilarity || 0);
+        return (b.confidenceScore || 0) - (a.confidenceScore || 0);
       })
       .slice(0, 20);
 
     return NextResponse.json({
       assetHash,
       match: compared.length > 0,
-      matchMode: compared.length ? "compression_resilient" : "none",
+      matchMode: compared.length ? "resilient" : "none",
       records: compared,
     });
   } catch (e) {

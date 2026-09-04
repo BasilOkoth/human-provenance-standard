@@ -1,19 +1,43 @@
 "use client";
 
 /**
- * HPS compression-resilient asset fingerprinting.
+ * HPS resilient document fingerprinting.
  *
- * Security model:
- * - SHA-256 remains the authoritative exact-file identity.
- * - Canonical text SHA-256 is conservative: Unicode normalization + whitespace
- *   normalization only. Numbers, punctuation, wording and order are preserved.
- * - Perceptual hashes are supporting evidence only; they MUST NOT be treated as
- *   cryptographic proof of equality.
- * - Files are processed in the browser. The verifier sends only fingerprints to
- *   the HPS API, not the uploaded file bytes.
+ * Trust model:
+ * - SHA-256 is always the authoritative exact-file identity.
+ * - OCR, canonical text, structural fingerprints and visual/mark signals are
+ *   supporting evidence used to detect likely derivatives and cross-format copies.
+ * - OCR never turns a scan into a cryptographically identical asset.
+ * - Files stay in the browser. HPS receives fingerprints, not file bytes.
  */
 
 export type HpsAssetModality = "text" | "visual" | "text_visual" | "binary";
+export type HpsTextSource = "embedded" | "ocr" | "mixed" | "extracted" | "plain" | "none";
+
+export type HpsOcrMetadata = {
+  used: boolean;
+  engine: "tesseract.js";
+  language: string;
+  averageConfidence: number | null;
+  pagesProcessed: number;
+  pageNumbers: number[];
+};
+
+export type HpsDocumentStructure = {
+  lineCount: number;
+  wordCount: number;
+  numericTokenCount: number;
+  dateLikeCount: number;
+  identifierLikeCount: number;
+  uppercaseLineCount: number;
+};
+
+export type HpsDocumentMarkSignals = {
+  detector: "hps-document-marks-1";
+  signatureLikelihood: number;
+  stampLikelihood: number;
+  note: string;
+};
 
 export type HpsAssetFingerprintV1 = {
   version: "hps-fingerprint-1";
@@ -22,9 +46,21 @@ export type HpsAssetFingerprintV1 = {
   fileName?: string;
   byteLength: number;
   modality: HpsAssetModality;
+
+  // Strict text identity. Conservative normalization only.
   canonicalTextSha256?: string | null;
   canonicalTextLength?: number | null;
   textSimHash64?: string | null;
+
+  // Cross-format comparison layer. Case/spacing/presentation differences are
+  // normalized, but wording and numbers remain represented.
+  contentCanonicalSha256?: string | null;
+  contentSimHash64?: string | null;
+  structureSimHash64?: string | null;
+  documentStructure?: HpsDocumentStructure | null;
+  textSource?: HpsTextSource;
+  ocr?: HpsOcrMetadata | null;
+
   pageCount?: number | null;
   visualPHashes?: string[];
   visualDHashes?: string[];
@@ -32,11 +68,16 @@ export type HpsAssetFingerprintV1 = {
   visualCoverage?: number | null;
   width?: number | null;
   height?: number | null;
+  markSignals?: HpsDocumentMarkSignals | null;
   warnings?: string[];
 };
 
 const VISUAL_MAX_PDF_PAGES = 80;
-const PDF_RENDER_MAX_DIMENSION = 420;
+const PDF_VISUAL_MAX_DIMENSION = 420;
+const OCR_RENDER_MAX_DIMENSION = 1800;
+const OCR_MAX_PDF_PAGES = 16;
+const OCR_MIN_USEFUL_TEXT = 12;
+const OCR_LANGUAGE = process.env.NEXT_PUBLIC_HPS_OCR_LANGUAGE || "eng";
 
 function bytesToHex(bytes: Uint8Array) {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -53,20 +94,34 @@ async function sha256Text(text: string) {
   return bytesToHex(new Uint8Array(digest));
 }
 
-/**
- * Intentionally conservative canonicalization.
- * We normalize representation differences but do NOT lowercase, remove numbers,
- * remove punctuation, reorder content, or otherwise make substantive edits vanish.
- */
+/** Conservative canonicalization used for a strong text identity. */
 export function normalizeDocumentText(text: string) {
   return text
     .normalize("NFKC")
-    .replace(/\u00ad/g, "") // soft hyphen introduced by some PDF pipelines
+    .replace(/\u00ad/g, "")
     .replace(/\u00a0/g, " ")
     .replace(/\r\n?/g, "\n")
     .replace(/[\t\f\v ]+/g, " ")
     .replace(/ *\n+ */g, "\n")
     .trim();
+}
+
+/**
+ * Cross-format normalization. This deliberately normalizes representation and
+ * typography more aggressively than canonicalTextSha256, while retaining words,
+ * numbers and punctuation. It is supporting evidence only.
+ */
+export function normalizeComparableDocumentText(text: string) {
+  return text
+    .normalize("NFKC")
+    .replace(/\u00ad/g, "")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[‐‑‒–—−]/g, "-")
+    .replace(/-\s*\n\s*(?=[\p{L}])/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
 }
 
 function fnv1a64(value: string) {
@@ -80,10 +135,7 @@ function fnv1a64(value: string) {
   return hash;
 }
 
-/**
- * 64-bit SimHash used only to identify possible related derivatives.
- * It is NOT a cryptographic hash and never replaces SHA-256.
- */
+/** 64-bit SimHash; never a cryptographic identity. */
 export function textSimHash64(text: string) {
   const tokens = normalizeDocumentText(text)
     .split(/\s+/u)
@@ -103,6 +155,57 @@ export function textSimHash64(text: string) {
     if (weights[bit] >= 0) result |= 1n << BigInt(bit);
   }
   return result.toString(16).padStart(16, "0");
+}
+
+function comparableSimHash64(text: string) {
+  const normalized = normalizeComparableDocumentText(text);
+  const tokens = normalized.match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) || [];
+  if (!tokens.length) return null;
+  return textSimHash64(tokens.join(" "));
+}
+
+function tokenShape(token: string) {
+  if (/^\p{L}+$/u.test(token)) return `L${Math.min(8, Math.ceil(token.length / 3))}`;
+  if (/^\p{N}+$/u.test(token)) return `N${Math.min(8, token.length)}`;
+  if (/^[\p{L}\p{N}]+$/u.test(token)) return "M";
+  return "P";
+}
+
+function buildDocumentStructure(text: string) {
+  const normalized = normalizeDocumentText(text);
+  const lines = normalized.split("\n").map(x => x.trim()).filter(Boolean);
+  const words = normalized.match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) || [];
+  const numericTokens = normalized.match(/\b\d+(?:[.,:/-]\d+)*\b/g) || [];
+  const dateLikes = normalized.match(/\b(?:\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{4}[\/-]\d{1,2}[\/-]\d{1,2})\b/g) || [];
+  const identifierLikes = normalized.match(/\b(?=[A-Z0-9-]{6,}\b)(?=[A-Z0-9-]*[A-Z])(?=[A-Z0-9-]*\d)[A-Z0-9-]+\b/g) || [];
+  const uppercaseLineCount = lines.filter(line => {
+    const letters = line.match(/\p{L}/gu) || [];
+    if (letters.length < 4) return false;
+    const uppers = line.match(/\p{Lu}/gu) || [];
+    return uppers.length / letters.length >= 0.8;
+  }).length;
+
+  // Build a bag-of-structural-token sequence for SimHash. Keeping shape tokens
+  // separate (rather than hashing one giant shape string) makes small formatting
+  // changes produce gradual similarity changes instead of an unrelated 64-bit hash.
+  const shapeText = lines.map(line => {
+    const tokens = line.match(/[\p{L}\p{N}]+|[^\s\p{L}\p{N}]+/gu) || [];
+    return `${tokens.map(tokenShape).join(" ")} LINE_BREAK`;
+  }).join(" ");
+
+  const structure: HpsDocumentStructure = {
+    lineCount: lines.length,
+    wordCount: words.length,
+    numericTokenCount: numericTokens.length,
+    dateLikeCount: dateLikes.length,
+    identifierLikeCount: identifierLikes.length,
+    uppercaseLineCount,
+  };
+
+  return {
+    structure,
+    structureSimHash64: shapeText ? textSimHash64(shapeText) : null,
+  };
 }
 
 function median(values: number[]) {
@@ -133,14 +236,20 @@ function grayscaleFromCanvas(canvas: HTMLCanvasElement) {
 
 function renderSourceToCanvas(source: CanvasImageSource, width: number, height: number) {
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Canvas 2D context unavailable.");
   ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(source, 0, 0, width, height);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   return canvas;
+}
+
+function scaledCanvas(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, maxDimension: number) {
+  const maxDim = Math.max(sourceWidth, sourceHeight, 1);
+  const scale = Math.min(1, maxDimension / maxDim);
+  return renderSourceToCanvas(source, sourceWidth * scale, sourceHeight * scale);
 }
 
 function dHash64(source: CanvasImageSource) {
@@ -184,6 +293,68 @@ function visualHashes(source: CanvasImageSource) {
   return { pHash: pHash64(source), dHash: dHash64(source) };
 }
 
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Conservative visual mark heuristics. They identify ink/color patterns that may
+ * correspond to signatures or stamps. They are not biometric/signature proof and
+ * never establish authenticity by themselves.
+ */
+function detectDocumentMarks(source: CanvasImageSource): HpsDocumentMarkSignals {
+  const canvas = renderSourceToCanvas(source, 192, 192);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas 2D context unavailable.");
+  const data = ctx.getImageData(0, 0, 192, 192).data;
+
+  let bottomDark = 0;
+  let bottomColored = 0;
+  let bottomPixels = 0;
+  let allColored = 0;
+
+  for (let y = 0; y < 192; y++) {
+    for (let x = 0; x < 192; x++) {
+      const i = (y * 192 + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      const coloredInk = chroma > 42 && lum < 235;
+      if (coloredInk) allColored++;
+      if (y >= 104) {
+        bottomPixels++;
+        if (lum < 150) bottomDark++;
+        if (coloredInk) bottomColored++;
+      }
+    }
+  }
+
+  const bottomDarkRatio = bottomPixels ? bottomDark / bottomPixels : 0;
+  const bottomColorRatio = bottomPixels ? bottomColored / bottomPixels : 0;
+  const colorRatio = allColored / (192 * 192);
+
+  // Deliberately modest scores to avoid presenting heuristic marks as proof.
+  const signatureLikelihood = clamp01((bottomDarkRatio - 0.012) / 0.12) * 0.78;
+  const stampLikelihood = clamp01(Math.max(bottomColorRatio * 24, colorRatio * 30)) * 0.84;
+
+  return {
+    detector: "hps-document-marks-1",
+    signatureLikelihood: Number(signatureLikelihood.toFixed(3)),
+    stampLikelihood: Number(stampLikelihood.toFixed(3)),
+    note: "Heuristic visual signal only; this does not authenticate a signature, seal or stamp.",
+  };
+}
+
+function mergeMarkSignals(signals: HpsDocumentMarkSignals[]): HpsDocumentMarkSignals | null {
+  if (!signals.length) return null;
+  return {
+    detector: "hps-document-marks-1",
+    signatureLikelihood: Math.max(...signals.map(s => s.signatureLikelihood)),
+    stampLikelihood: Math.max(...signals.map(s => s.stampLikelihood)),
+    note: "Maximum supporting signal across sampled pages; not proof of signature/stamp authenticity.",
+  };
+}
+
 function isPdf(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -210,6 +381,50 @@ function evenlySampledPageIndexes(pageCount: number, maxPages: number) {
   return [...indexes].sort((a, b) => a - b);
 }
 
+async function createOcrWorker() {
+  const tesseract: any = await import("tesseract.js");
+  return tesseract.createWorker(OCR_LANGUAGE);
+}
+
+async function recognizeCanvas(worker: any, canvas: HTMLCanvasElement) {
+  const result = await worker.recognize(canvas);
+  return {
+    text: normalizeDocumentText(result?.data?.text || ""),
+    confidence: typeof result?.data?.confidence === "number" ? result.data.confidence : null,
+  };
+}
+
+async function renderPdfPage(page: any, maxDimension: number) {
+  const baseViewport = page.getViewport({ scale: 1 });
+  const maxDim = Math.max(baseViewport.width, baseViewport.height, 1);
+  const scale = Math.min(1.75, maxDimension / maxDim);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas 2D context unavailable.");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+  return canvas;
+}
+
+async function textFingerprintFields(text: string) {
+  const strict = normalizeDocumentText(text);
+  const comparable = normalizeComparableDocumentText(text);
+  const { structure, structureSimHash64 } = buildDocumentStructure(strict);
+  return {
+    canonicalTextSha256: strict.length >= OCR_MIN_USEFUL_TEXT ? await sha256Text(strict) : null,
+    canonicalTextLength: strict.length,
+    textSimHash64: strict.length >= OCR_MIN_USEFUL_TEXT ? textSimHash64(strict) : null,
+    contentCanonicalSha256: comparable.length >= OCR_MIN_USEFUL_TEXT ? await sha256Text(comparable) : null,
+    contentSimHash64: comparable.length >= OCR_MIN_USEFUL_TEXT ? comparableSimHash64(comparable) : null,
+    structureSimHash64: strict.length >= OCR_MIN_USEFUL_TEXT ? structureSimHash64 : null,
+    documentStructure: strict.length >= OCR_MIN_USEFUL_TEXT ? structure : null,
+  };
+}
+
 async function fingerprintPdf(file: File, exactSha256: string, buffer: ArrayBuffer): Promise<HpsAssetFingerprintV1> {
   const warnings: string[] = [];
   const pdfjs = await import("pdfjs-dist");
@@ -226,49 +441,91 @@ async function fingerprintPdf(file: File, exactSha256: string, buffer: ArrayBuff
   const visualDHashes: string[] = [];
   const visualPageIndexes = evenlySampledPageIndexes(pageCount, VISUAL_MAX_PDF_PAGES);
   const visualSet = new Set(visualPageIndexes);
+  const markSignals: HpsDocumentMarkSignals[] = [];
+  const ocrPageNumbers: number[] = [];
+  const ocrConfidences: number[] = [];
+  let worker: any = null;
+  let embeddedPages = 0;
+  let ocrPages = 0;
+  let skippedOcrPages = 0;
 
-  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    const text = (textContent.items as any[])
-      .map(item => typeof item?.str === "string" ? item.str : "")
-      .filter(Boolean)
-      .join(" ");
-    pageTexts.push(normalizeDocumentText(text));
+  try {
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const embedded = normalizeDocumentText(
+        (textContent.items as any[])
+          .map(item => typeof item?.str === "string" ? item.str : "")
+          .filter(Boolean)
+          .join(" ")
+      );
 
-    if (visualSet.has(pageNumber)) {
-      const baseViewport = page.getViewport({ scale: 1 });
-      const maxDim = Math.max(baseViewport.width, baseViewport.height);
-      const scale = Math.min(1, PDF_RENDER_MAX_DIMENSION / Math.max(1, maxDim));
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.ceil(viewport.width));
-      canvas.height = Math.max(1, Math.ceil(viewport.height));
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) throw new Error("Canvas 2D context unavailable.");
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-      const hashes = visualHashes(canvas);
-      visualPHashes.push(hashes.pHash);
-      visualDHashes.push(hashes.dHash);
-      canvas.width = 1;
-      canvas.height = 1;
+      const needsOcr = embedded.length < OCR_MIN_USEFUL_TEXT;
+      let pageText = embedded;
+      let rendered: HTMLCanvasElement | null = null;
+
+      if (embedded.length >= OCR_MIN_USEFUL_TEXT) embeddedPages++;
+
+      if (needsOcr && ocrPages < OCR_MAX_PDF_PAGES) {
+        try {
+          rendered = await renderPdfPage(page, OCR_RENDER_MAX_DIMENSION);
+          worker ||= await createOcrWorker();
+          const recognized = await recognizeCanvas(worker, rendered);
+          if (recognized.text.length >= OCR_MIN_USEFUL_TEXT) {
+            pageText = recognized.text;
+            ocrPages++;
+            ocrPageNumbers.push(pageNumber);
+            if (recognized.confidence !== null) ocrConfidences.push(recognized.confidence);
+          }
+        } catch (error: any) {
+          warnings.push(`OCR could not read PDF page ${pageNumber}: ${String(error?.message || error).slice(0, 220)}`);
+        }
+      } else if (needsOcr) {
+        skippedOcrPages++;
+      }
+
+      pageTexts.push(pageText);
+
+      if (visualSet.has(pageNumber)) {
+        if (!rendered) rendered = await renderPdfPage(page, PDF_VISUAL_MAX_DIMENSION);
+        const hashes = visualHashes(rendered);
+        visualPHashes.push(hashes.pHash);
+        visualDHashes.push(hashes.dHash);
+        markSignals.push(detectDocumentMarks(rendered));
+      }
+
+      if (rendered) {
+        rendered.width = 1;
+        rendered.height = 1;
+      }
+      page.cleanup();
     }
-
-    page.cleanup();
+  } finally {
+    if (worker) {
+      try { await worker.terminate(); } catch {}
+    }
+    await pdf.destroy();
   }
-
-  await pdf.destroy();
 
   const canonicalText = normalizeDocumentText(pageTexts.join("\n\f\n"));
-  const hasUsefulText = canonicalText.length >= 12;
+  const hasUsefulText = canonicalText.length >= OCR_MIN_USEFUL_TEXT;
+  const fields = await textFingerprintFields(canonicalText);
+
   if (!hasUsefulText) {
-    warnings.push("No reliable PDF text layer was detected. HPS will treat visual similarity as supporting evidence only.");
+    warnings.push("No reliable embedded or OCR text was recovered. HPS will use visual similarity only as supporting evidence.");
+  }
+  if (skippedOcrPages > 0) {
+    warnings.push(`OCR is capped at ${OCR_MAX_PDF_PAGES} image-only pages per file; ${skippedOcrPages} page(s) were not OCR-processed.`);
   }
   if (visualPageIndexes.length < pageCount) {
-    warnings.push(`Visual fingerprints cover ${visualPageIndexes.length} of ${pageCount} pages; full text is still fingerprinted.`);
+    warnings.push(`Visual fingerprints cover ${visualPageIndexes.length} of ${pageCount} pages; text/OCR coverage may be broader.`);
   }
+
+  const averageConfidence = ocrConfidences.length
+    ? ocrConfidences.reduce((a, b) => a + b, 0) / ocrConfidences.length
+    : null;
+
+  const textSource: HpsTextSource = ocrPages && embeddedPages ? "mixed" : ocrPages ? "ocr" : embeddedPages ? "embedded" : "none";
 
   return {
     version: "hps-fingerprint-1",
@@ -277,33 +534,73 @@ async function fingerprintPdf(file: File, exactSha256: string, buffer: ArrayBuff
     fileName: file.name,
     byteLength: file.size,
     modality: hasUsefulText ? "text_visual" : "visual",
-    canonicalTextSha256: hasUsefulText ? await sha256Text(canonicalText) : null,
-    canonicalTextLength: hasUsefulText ? canonicalText.length : 0,
-    textSimHash64: hasUsefulText ? textSimHash64(canonicalText) : null,
+    ...fields,
+    textSource,
+    ocr: {
+      used: ocrPages > 0,
+      engine: "tesseract.js",
+      language: OCR_LANGUAGE,
+      averageConfidence: averageConfidence === null ? null : Number(averageConfidence.toFixed(1)),
+      pagesProcessed: ocrPages,
+      pageNumbers: ocrPageNumbers,
+    },
     pageCount,
     visualPHashes,
     visualDHashes,
     visualPageIndexes,
     visualCoverage: pageCount ? visualPageIndexes.length / pageCount : 0,
+    markSignals: mergeMarkSignals(markSignals),
     warnings,
   };
 }
 
 async function fingerprintImage(file: File, exactSha256: string): Promise<HpsAssetFingerprintV1> {
+  const warnings: string[] = [
+    "Visual and OCR fingerprints are supporting evidence and do not replace exact SHA-256 identity.",
+    "Signature/stamp signals are heuristic only and do not authenticate a person, seal or institution.",
+  ];
   let bitmap: ImageBitmap | null = null;
+  let worker: any = null;
+
   try {
     bitmap = await createImageBitmap(file);
     const hashes = visualHashes(bitmap);
+    const markSignals = detectDocumentMarks(bitmap);
+    let ocrText = "";
+    let confidence: number | null = null;
+
+    try {
+      const canvas = scaledCanvas(bitmap, bitmap.width, bitmap.height, OCR_RENDER_MAX_DIMENSION);
+      worker = await createOcrWorker();
+      const recognized = await recognizeCanvas(worker, canvas);
+      ocrText = recognized.text;
+      confidence = recognized.confidence;
+      canvas.width = 1;
+      canvas.height = 1;
+    } catch (error: any) {
+      warnings.push(`OCR unavailable for this image: ${String(error?.message || error).slice(0, 220)}`);
+    }
+
+    const fields = await textFingerprintFields(ocrText);
+    const hasText = ocrText.length >= OCR_MIN_USEFUL_TEXT;
+
     return {
       version: "hps-fingerprint-1",
       exactSha256,
       mimeType: file.type || "application/octet-stream",
       fileName: file.name,
       byteLength: file.size,
-      modality: "visual",
-      canonicalTextSha256: null,
-      canonicalTextLength: 0,
-      textSimHash64: null,
+      modality: hasText ? "text_visual" : "visual",
+      ...fields,
+      textSource: hasText ? "ocr" : "none",
+      ocr: {
+        used: hasText,
+        engine: "tesseract.js",
+        language: OCR_LANGUAGE,
+        averageConfidence: confidence === null ? null : Number(confidence.toFixed(1)),
+        pagesProcessed: hasText ? 1 : 0,
+        pageNumbers: hasText ? [1] : [],
+      },
       pageCount: 1,
       visualPHashes: [hashes.pHash],
       visualDHashes: [hashes.dHash],
@@ -311,9 +608,13 @@ async function fingerprintImage(file: File, exactSha256: string): Promise<HpsAss
       visualCoverage: 1,
       width: bitmap.width,
       height: bitmap.height,
-      warnings: ["Visual fingerprints are perceptual evidence and do not replace the exact SHA-256 identity."],
+      markSignals,
+      warnings,
     };
   } finally {
+    if (worker) {
+      try { await worker.terminate(); } catch {}
+    }
     bitmap?.close();
   }
 }
@@ -323,7 +624,8 @@ async function fingerprintDocx(file: File, exactSha256: string, buffer: ArrayBuf
   const result = await mammoth.extractRawText({ arrayBuffer: buffer });
   const canonicalText = normalizeDocumentText(result.value || "");
   const warnings = (result.messages || []).map((m: any) => String(m?.message || m)).slice(0, 10);
-  warnings.push("DOCX text is fingerprinted, but layout/images are not yet visually fingerprinted; derivative verification is conservative.");
+  warnings.push("DOCX text is extracted for cross-format matching. Layout, embedded signatures and stamps are not visually authenticated from DOCX.");
+  const fields = await textFingerprintFields(canonicalText);
 
   return {
     version: "hps-fingerprint-1",
@@ -332,14 +634,15 @@ async function fingerprintDocx(file: File, exactSha256: string, buffer: ArrayBuf
     fileName: file.name,
     byteLength: file.size,
     modality: "text",
-    canonicalTextSha256: canonicalText ? await sha256Text(canonicalText) : null,
-    canonicalTextLength: canonicalText.length,
-    textSimHash64: canonicalText ? textSimHash64(canonicalText) : null,
+    ...fields,
+    textSource: canonicalText.length >= OCR_MIN_USEFUL_TEXT ? "extracted" : "none",
+    ocr: null,
     pageCount: null,
     visualPHashes: [],
     visualDHashes: [],
     visualPageIndexes: [],
     visualCoverage: null,
+    markSignals: null,
     warnings,
   };
 }
@@ -347,6 +650,7 @@ async function fingerprintDocx(file: File, exactSha256: string, buffer: ArrayBuf
 async function fingerprintTextFile(file: File, exactSha256: string, buffer: ArrayBuffer): Promise<HpsAssetFingerprintV1> {
   const raw = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
   const canonicalText = normalizeDocumentText(raw);
+  const fields = await textFingerprintFields(canonicalText);
   return {
     version: "hps-fingerprint-1",
     exactSha256,
@@ -354,14 +658,15 @@ async function fingerprintTextFile(file: File, exactSha256: string, buffer: Arra
     fileName: file.name,
     byteLength: file.size,
     modality: "text",
-    canonicalTextSha256: canonicalText ? await sha256Text(canonicalText) : null,
-    canonicalTextLength: canonicalText.length,
-    textSimHash64: canonicalText ? textSimHash64(canonicalText) : null,
+    ...fields,
+    textSource: canonicalText.length >= OCR_MIN_USEFUL_TEXT ? "plain" : "none",
+    ocr: null,
     pageCount: null,
     visualPHashes: [],
     visualDHashes: [],
     visualPageIndexes: [],
     visualCoverage: null,
+    markSignals: null,
     warnings: [],
   };
 }
@@ -371,7 +676,9 @@ export async function fingerprintFile(file: File): Promise<HpsAssetFingerprintV1
   const exactSha256 = await sha256Buffer(buffer);
 
   if (isPdf(file)) return fingerprintPdf(file, exactSha256, buffer);
-  if (file.type.startsWith("image/")) return fingerprintImage(file, exactSha256);
+  if (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)) {
+    return fingerprintImage(file, exactSha256);
+  }
   if (isDocx(file)) return fingerprintDocx(file, exactSha256, buffer);
   if (isTextLike(file)) return fingerprintTextFile(file, exactSha256, buffer);
 
@@ -385,11 +692,18 @@ export async function fingerprintFile(file: File): Promise<HpsAssetFingerprintV1
     canonicalTextSha256: null,
     canonicalTextLength: null,
     textSimHash64: null,
+    contentCanonicalSha256: null,
+    contentSimHash64: null,
+    structureSimHash64: null,
+    documentStructure: null,
+    textSource: "none",
+    ocr: null,
     pageCount: null,
     visualPHashes: [],
     visualDHashes: [],
     visualPageIndexes: [],
     visualCoverage: null,
+    markSignals: null,
     warnings: ["This file type currently supports exact SHA-256 verification only."],
   };
 }

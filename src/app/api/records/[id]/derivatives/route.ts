@@ -6,12 +6,21 @@ import { AssetFingerprintSchema } from "@/lib/hps/schema";
 import { compareAssetFingerprints } from "@/lib/hps/fingerprint-compare";
 import { signRegistryObject } from "@/lib/hps/crypto";
 
+const TransformationTypeSchema = z.enum([
+  "compression",
+  "optimization",
+  "format_conversion",
+  "digitization",
+  "transcription",
+  "resize",
+  "metadata_stripped",
+  "transmission",
+  "other"
+]);
+
 const BodySchema = z.object({
   fingerprint: AssetFingerprintSchema,
-  transformationType: z.enum([
-    "compression", "optimization", "format_conversion", "resize",
-    "metadata_stripped", "transmission", "other"
-  ]),
+  transformationType: TransformationTypeSchema,
   note: z.string().max(1000).optional(),
 });
 
@@ -52,7 +61,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
     const parsed = BodySchema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: "Invalid derivative registration.", details: parsed.error.issues }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid derivative registration.", details: parsed.error.issues }, { status: 400 });
+    }
 
     const admin = createAdminSupabase();
     const { data: record } = await admin
@@ -61,49 +72,80 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .eq("id", id)
       .single();
     if (!record) return NextResponse.json({ error: "HPS record not found." }, { status: 404 });
-    if (record.status === "revoked") return NextResponse.json({ error: "A revoked record cannot register new derivatives." }, { status: 409 });
-    if (!(await mayRegister(user.id, record, admin))) return NextResponse.json({ error: "You are not authorized to register derivatives for this record." }, { status: 403 });
+    if (record.status === "revoked") {
+      return NextResponse.json({ error: "A revoked record cannot register new derivatives." }, { status: 409 });
+    }
+    if (!(await mayRegister(user.id, record, admin))) {
+      return NextResponse.json({ error: "You are not authorized to register derivatives for this record." }, { status: 403 });
+    }
 
     const originalParsed = AssetFingerprintSchema.safeParse(record.asset_fingerprint);
     if (!originalParsed.success) {
-      return NextResponse.json({ error: "This legacy record has no compression-resilient fingerprint. Re-issue or supersede it with an HPS v1.1 fingerprint first." }, { status: 409 });
+      return NextResponse.json({
+        error: "This record has no resilient HPS fingerprint. Re-issue or supersede it with an OCR/cross-format fingerprint first."
+      }, { status: 409 });
     }
 
     const comparison = compareAssetFingerprints(originalParsed.data, parsed.data.fingerprint);
-    if (comparison.status !== "verified_derivative") {
+    const transformationType = parsed.data.transformationType;
+    const explicitDocumentTransformation = transformationType === "digitization" || transformationType === "transcription";
+
+    const strongCrossFormat =
+      comparison.status === "cross_format_match" &&
+      comparison.confidenceScore >= 75 &&
+      (
+        comparison.canonicalTextMatch === true ||
+        comparison.contentCanonicalMatch === true ||
+        (comparison.contentSimilarity ?? 0) >= 0.95
+      );
+
+    const allowed = comparison.status === "verified_derivative" || strongCrossFormat;
+
+    if (!allowed) {
       return NextResponse.json({
-        error: "HPS cannot automatically register this file as a verified derivative.",
+        error: explicitDocumentTransformation
+          ? "HPS does not have enough evidence to register this digitization/transcription relationship automatically. Review the comparison or add stronger source evidence."
+          : "HPS cannot automatically register this file as a verified derivative.",
         comparison,
       }, { status: 409 });
     }
 
     const publicKey = process.env.HPS_REGISTRY_PUBLIC_KEY;
     const secretKey = process.env.HPS_REGISTRY_SECRET_KEY;
-    if (!publicKey || !secretKey) return NextResponse.json({ error: "Registry signing unavailable." }, { status: 503 });
+    if (!publicKey || !secretKey) {
+      return NextResponse.json({ error: "Registry signing unavailable." }, { status: 503 });
+    }
 
     const now = new Date().toISOString();
     const registryPayload = {
-      hpsVersion: "1.1",
+      hpsVersion: "1.2",
       type: "registered_derivative",
       parentRecordId: id,
       derivativeSha256: parsed.data.fingerprint.exactSha256,
-      transformationType: parsed.data.transformationType,
+      transformationType,
       fingerprintVersion: parsed.data.fingerprint.version,
       comparison,
+      relationshipBasis: comparison.status === "cross_format_match" ? "cross_format_fingerprint" : "resilient_fingerprint",
       registeredBy: user.id,
       registeredAt: now,
     };
     const registrySignature = signRegistryObject(registryPayload, secretKey);
+
+    const assurance = comparison.assurance === "high"
+      ? "high"
+      : comparison.assurance === "low"
+        ? "low"
+        : "medium";
 
     const { data, error } = await admin
       .from("hps_registered_derivatives")
       .upsert({
         parent_record_id: id,
         derivative_sha256: parsed.data.fingerprint.exactSha256,
-        transformation_type: parsed.data.transformationType,
+        transformation_type: transformationType,
         derivative_fingerprint: parsed.data.fingerprint,
         comparison,
-        assurance: comparison.assurance === "high" ? "high" : "medium",
+        assurance,
         note: parsed.data.note || null,
         registered_by: user.id,
         registry_payload: registryPayload,

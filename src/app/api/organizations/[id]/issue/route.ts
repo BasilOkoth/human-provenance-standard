@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import {
+  AssetFingerprintSchema,
   IssueInstitutionalRecordSchema,
   type HPSManifest
 } from "@/lib/hps/schema";
@@ -9,6 +10,7 @@ import {
   verifyDetachedCanonical,
   signRegistryManifest
 } from "@/lib/hps/crypto";
+import { compareAssetFingerprints } from "@/lib/hps/fingerprint-compare";
 import { createHpsId } from "@/lib/hps/ids";
 
 const RELS = new Set([
@@ -34,101 +36,50 @@ export async function POST(
 
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: "Invalid institutional record.",
-          details: parsed.error.issues
-        },
+        { error: "Invalid institutional record.", details: parsed.error.issues },
         { status: 400 }
       );
     }
 
     const s = await createServerSupabase();
-    const {
-      data: { user }
-    } = await s.auth.getUser();
-
+    const { data: { user } } = await s.auth.getUser();
     if (!user) {
-      return NextResponse.json(
-        { error: "Authentication required." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
     const claim = parsed.data.institutionalClaim;
-
     if (claim.organizationId !== id) {
-      return NextResponse.json(
-        { error: "Organization mismatch." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Organization mismatch." }, { status: 400 });
     }
 
     const a = createAdminSupabase();
-
     const [
       { data: member },
       { data: org },
       { data: key }
     ] = await Promise.all([
-      a
-        .from("hps_org_members")
-        .select("role,status")
-        .eq("org_id", id)
-        .eq("user_id", user.id)
-        .single(),
-      a
-        .from("hps_organizations")
-        .select("*")
-        .eq("id", id)
-        .single(),
-      a
-        .from("hps_issuer_keys")
-        .select("*")
-        .eq("id", claim.issuerKeyId)
-        .eq("org_id", id)
-        .eq("status", "active")
-        .single()
+      a.from("hps_org_members").select("role,status").eq("org_id", id).eq("user_id", user.id).single(),
+      a.from("hps_organizations").select("*").eq("id", id).single(),
+      a.from("hps_issuer_keys").select("*").eq("id", claim.issuerKeyId).eq("org_id", id).eq("status", "active").single()
     ]);
 
-    if (
-      !member ||
-      member.status !== "active" ||
-      !["admin", "issuer"].includes(member.role)
-    ) {
-      return NextResponse.json(
-        { error: "Authorized issuer role required." },
-        { status: 403 }
-      );
+    if (!member || member.status !== "active" || !["admin", "issuer"].includes(member.role)) {
+      return NextResponse.json({ error: "Authorized issuer role required." }, { status: 403 });
     }
 
     if (!org || org.verification_status !== "verified") {
       return NextResponse.json(
-        {
-          error:
-            "Institution must be verified before it can issue HPS institutional records."
-        },
+        { error: "Institution must be verified before it can issue HPS institutional records." },
         { status: 403 }
       );
     }
 
     if (!key || key.public_key !== claim.issuerPublicKey) {
-      return NextResponse.json(
-        { error: "Issuer key is not registered to this institution." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Issuer key is not registered to this institution." }, { status: 400 });
     }
 
-    if (
-      !verifyDetachedCanonical(
-        claim,
-        parsed.data.institutionSignature,
-        claim.issuerPublicKey
-      )
-    ) {
-      return NextResponse.json(
-        { error: "Institution signature verification failed." },
-        { status: 400 }
-      );
+    if (!verifyDetachedCanonical(claim, parsed.data.institutionSignature, claim.issuerPublicKey)) {
+      return NextResponse.json({ error: "Institution signature verification failed." }, { status: 400 });
     }
 
     /* Exact bytes are never a meaningful new version. */
@@ -138,7 +89,6 @@ export async function POST(
       .eq("record_kind", "institutional_document")
       .eq("asset_hash", claim.assetHash)
       .in("status", ["active", "superseded"]);
-
     if (dupErr) throw dupErr;
 
     const same = (dups ?? []).filter(r => r.issuer_org_id === id);
@@ -147,8 +97,7 @@ export async function POST(
     if (same.length) {
       return NextResponse.json(
         {
-          error:
-            "This exact asset is already registered by this institution. A new version must contain changed bytes.",
+          error: "This exact asset is already registered by this institution. A new version must contain changed bytes.",
           existing: same
         },
         { status: 409 }
@@ -163,7 +112,6 @@ export async function POST(
       asset_hash: string;
       record_kind: string;
     } = null;
-
     let version = 1;
 
     if (claim.parentRecordId) {
@@ -174,95 +122,128 @@ export async function POST(
         .single();
 
       if (parentError || !parentRow) {
+        return NextResponse.json({ error: "Parent HPS record not found." }, { status: 400 });
+      }
+      if (parentRow.record_kind !== "institutional_document" || parentRow.issuer_org_id !== id) {
         return NextResponse.json(
-          { error: "Parent HPS record not found." },
+          { error: "The parent record must be an institutional record issued by this same institution." },
           { status: 400 }
         );
       }
-
-      if (
-        parentRow.record_kind !== "institutional_document" ||
-        parentRow.issuer_org_id !== id
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "The parent record must be an institutional record issued by this same institution."
-          },
-          { status: 400 }
-        );
-      }
-
       if (parentRow.status !== "active") {
         return NextResponse.json(
-          {
-            error:
-              "Only an active institutional record can be used as the parent of a new version."
-          },
+          { error: "Only an active institutional record can be used as the parent of a new version." },
           { status: 409 }
         );
       }
-
       if (parentRow.asset_hash === claim.assetHash) {
         return NextResponse.json(
-          {
-            error:
-              "A new version cannot contain the exact same bytes as its parent."
-          },
+          { error: "A new version cannot contain the exact same bytes as its parent." },
           { status: 409 }
         );
       }
-
       parent = parentRow;
       version = (parentRow.version || 1) + 1;
     }
 
-    let rel: null | {
-      relatedRecordId: string;
-      relationshipType: string;
-    } = null;
+    let rel: null | { relatedRecordId: string; relationshipType: string } = null;
 
     if (other.length) {
-      if (
-        !relationship ||
-        typeof relationship.relatedRecordId !== "string" ||
-        !RELS.has(relationship.relationshipType)
-      ) {
+      if (!relationship || typeof relationship.relatedRecordId !== "string" || !RELS.has(relationship.relationshipType)) {
         return NextResponse.json(
           {
-            error:
-              "This exact asset is already registered by another institution. Declare a relationship before issuing.",
+            error: "This exact asset is already registered by another institution. Declare a relationship before issuing.",
             duplicateAsset: true,
             existing: other
           },
           { status: 409 }
         );
       }
-
       if (!other.some(r => r.id === relationship.relatedRecordId)) {
-        return NextResponse.json(
-          { error: "Related HPS record does not match this exact asset." },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "Related HPS record does not match this exact asset." }, { status: 400 });
       }
-
       rel = {
         relatedRecordId: relationship.relatedRecordId,
         relationshipType: relationship.relationshipType
       };
     }
 
-    const publicKey = process.env.HPS_REGISTRY_PUBLIC_KEY;
-    const secretKey = process.env.HPS_REGISTRY_SECRET_KEY;
+    /*
+     * Cross-format / OCR provenance guard.
+     * A strong relationship is not silently allowed to become a fresh original.
+     * An explicit version parent is allowed when the match is that parent.
+     */
+    if (claim.assetFingerprint) {
+      const candidateParsed = AssetFingerprintSchema.safeParse(claim.assetFingerprint);
+      if (candidateParsed.success) {
+        const candidateRows = new Map<string, any>();
 
-    if (!publicKey || !secretKey) {
-      return NextResponse.json(
-        { error: "Registry signing unavailable." },
-        { status: 503 }
-      );
+        if (candidateParsed.data.canonicalTextSha256) {
+          const { data } = await a
+            .from("hps_records")
+            .select("id,title,creator_name,issuer_org_id,status,version,asset_hash,asset_fingerprint")
+            .eq("record_kind", "institutional_document")
+            .eq("canonical_text_sha256", candidateParsed.data.canonicalTextSha256)
+            .not("asset_fingerprint", "is", null)
+            .in("status", ["active", "superseded"])
+            .limit(100);
+          (data || []).forEach((row: any) => candidateRows.set(row.id, row));
+        }
+
+        if (candidateParsed.data.contentCanonicalSha256) {
+          const { data } = await a
+            .from("hps_records")
+            .select("id,title,creator_name,issuer_org_id,status,version,asset_hash,asset_fingerprint")
+            .eq("record_kind", "institutional_document")
+            .eq("content_canonical_sha256", candidateParsed.data.contentCanonicalSha256)
+            .not("asset_fingerprint", "is", null)
+            .in("status", ["active", "superseded"])
+            .limit(100);
+          (data || []).forEach((row: any) => candidateRows.set(row.id, row));
+        }
+
+        const { data: recent } = await a
+          .from("hps_records")
+          .select("id,title,creator_name,issuer_org_id,status,version,asset_hash,asset_fingerprint")
+          .eq("record_kind", "institutional_document")
+          .not("asset_fingerprint", "is", null)
+          .in("status", ["active", "superseded"])
+          .order("created_at", { ascending: false })
+          .limit(350);
+        (recent || []).forEach((row: any) => candidateRows.set(row.id, row));
+
+        const related = [...candidateRows.values()]
+          .filter((row: any) => row.asset_hash !== claim.assetHash && row.id !== parent?.id)
+          .flatMap((row: any) => {
+            const original = AssetFingerprintSchema.safeParse(row.asset_fingerprint);
+            if (!original.success) return [];
+            const comparison = compareAssetFingerprints(original.data, candidateParsed.data);
+            const blocksFreshOriginal =
+              comparison.status === "verified_derivative" ||
+              (comparison.status === "cross_format_match" && comparison.confidenceScore >= 75);
+            return blocksFreshOriginal ? [{ ...row, comparison }] : [];
+          })
+          .sort((left: any, right: any) => (right.comparison?.confidenceScore || 0) - (left.comparison?.confidenceScore || 0));
+
+        if (related.length) {
+          return NextResponse.json(
+            {
+              error: "HPS detected strong existing provenance for this content in another file or format. Do not issue it as a fresh original. Review the existing record and register an explicit digitization, transcription, format-conversion or version relationship.",
+              relatedAsset: true,
+              existing: related.slice(0, 10)
+            },
+            { status: 409 }
+          );
+        }
+      }
     }
 
-    /* Reduce the chance of two concurrent requests registering the same bytes. */
+    const publicKey = process.env.HPS_REGISTRY_PUBLIC_KEY;
+    const secretKey = process.env.HPS_REGISTRY_SECRET_KEY;
+    if (!publicKey || !secretKey) {
+      return NextResponse.json({ error: "Registry signing unavailable." }, { status: 503 });
+    }
+
     const { data: lateSame, error: lateSameError } = await a
       .from("hps_records")
       .select("id,title,version,status")
@@ -271,14 +252,11 @@ export async function POST(
       .eq("asset_hash", claim.assetHash)
       .in("status", ["active", "superseded"])
       .limit(1);
-
     if (lateSameError) throw lateSameError;
-
     if (lateSame?.length) {
       return NextResponse.json(
         {
-          error:
-            "This exact asset was registered by this institution before the request completed.",
+          error: "This exact asset was registered by this institution before the request completed.",
           existing: lateSame
         },
         { status: 409 }
@@ -287,14 +265,8 @@ export async function POST(
 
     const recordId = createHpsId();
     const now = new Date().toISOString();
-
-    const lifecycleStatement = parent
-      ? ` This is Version ${version}, replacing ${parent.id}.`
-      : "";
-
-    const relationshipStatement = rel
-      ? ` Relationship to ${rel.relatedRecordId}: ${rel.relationshipType}.`
-      : "";
+    const lifecycleStatement = parent ? ` This is Version ${version}, replacing ${parent.id}.` : "";
+    const relationshipStatement = rel ? ` Relationship to ${rel.relatedRecordId}: ${rel.relationshipType}.` : "";
 
     const manifest: HPSManifest = {
       hpsVersion: "1.0",
@@ -305,7 +277,8 @@ export async function POST(
         createdAt: claim.issuedAt,
         version,
         sha256: claim.assetHash,
-        fileName: claim.fileName
+        fileName: claim.fileName,
+        fingerprint: claim.assetFingerprint
       },
       actors: [
         {
@@ -336,22 +309,12 @@ export async function POST(
         value: parsed.data.institutionSignature
       },
       interoperability: {
-        c2pa: {
-          mappingVersion: "1.0",
-          status: "exportable"
-        },
-        verifiableCredential: {
-          contextVersion: "2.0",
-          status: "exportable"
-        }
+        c2pa: { mappingVersion: "1.0", status: "exportable" },
+        verifiableCredential: { contextVersion: "2.0", status: "exportable" }
       }
     };
 
-    const signed = signRegistryManifest(
-      manifest,
-      publicKey,
-      secretKey
-    );
+    const signed = signRegistryManifest(manifest, publicKey, secretKey);
 
     const { error: insertError } = await a
       .from("hps_records")
@@ -363,6 +326,9 @@ export async function POST(
         work_type: claim.documentType,
         record_kind: "institutional_document",
         asset_hash: claim.assetHash,
+        asset_fingerprint: claim.assetFingerprint || null,
+        canonical_text_sha256: claim.assetFingerprint?.canonicalTextSha256 || null,
+        fingerprint_version: claim.assetFingerprint?.version || null,
         manifest: signed,
         registry_signature: signed.registrySignature!.value,
         registry_public_key: publicKey,
@@ -387,7 +353,6 @@ export async function POST(
           declaring_org_id: id,
           created_by: user.id
         });
-
       if (relErr) {
         await a.from("hps_records").delete().eq("id", recordId);
         throw relErr;
@@ -397,10 +362,7 @@ export async function POST(
     if (parent) {
       const { data: superseded, error: supersedeError } = await a
         .from("hps_records")
-        .update({
-          status: "superseded",
-          superseded_by_id: recordId
-        })
+        .update({ status: "superseded", superseded_by_id: recordId })
         .eq("id", parent.id)
         .eq("issuer_org_id", id)
         .eq("status", "active")
@@ -408,36 +370,21 @@ export async function POST(
         .maybeSingle();
 
       if (supersedeError || !superseded) {
-        await a
-          .from("hps_asset_relationships")
-          .delete()
-          .eq("record_id", recordId);
+        await a.from("hps_asset_relationships").delete().eq("record_id", recordId);
         await a.from("hps_records").delete().eq("id", recordId);
-
         return NextResponse.json(
-          {
-            error:
-              "The previous version changed before this issuance completed. Refresh the record and try again."
-          },
+          { error: "The previous version changed before this issuance completed. Refresh the record and try again." },
           { status: 409 }
         );
       }
     }
 
     return NextResponse.json(
-      {
-        id: recordId,
-        manifest: signed,
-        version,
-        parentRecordId: parent?.id || null
-      },
+      { id: recordId, manifest: signed, version, parentRecordId: parent?.id || null },
       { status: 201 }
     );
   } catch (e) {
     console.error(e);
-    return NextResponse.json(
-      { error: "Unable to issue institutional record." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Unable to issue institutional record." }, { status: 500 });
   }
 }
