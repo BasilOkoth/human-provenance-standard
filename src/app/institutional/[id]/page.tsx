@@ -8,6 +8,10 @@ import {
   getIssuerPublicKey,
   signIssuerClaim
 } from "@/lib/hps/issuer-keyvault";
+import {
+  fingerprintFile,
+  type HpsAssetFingerprintV1
+} from "@/lib/hps/fingerprint-client";
 
 type InstitutionalRecordRef = {
   id: string;
@@ -21,17 +25,6 @@ type InstitutionalRecordRef = {
   work_type?: string;
   manifest?: any;
 };
-
-async function hashFile(file: File) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await file.arrayBuffer()
-  );
-
-  return Array.from(new Uint8Array(digest))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 export default function Page({
   params
@@ -52,6 +45,8 @@ export default function Page({
   const [subjectName, setSubjectName] = useState("");
   const [fileName, setFileName] = useState("");
   const [assetHash, setAssetHash] = useState("");
+  const [assetFingerprint, setAssetFingerprint] = useState<HpsAssetFingerprintV1 | null>(null);
+  const [provenanceMatch, setProvenanceMatch] = useState<any | null>(null);
   const [msg, setMsg] = useState("");
   const [issuedRecordId, setIssuedRecordId] = useState("");
 
@@ -207,6 +202,8 @@ export default function Page({
     setVersionParent(record);
     setSameOrgMatches([]);
     setAssetHash("");
+    setAssetFingerprint(null);
+    setProvenanceMatch(null);
     setFileName("");
     setDups([]);
     setRelatedRecordId("");
@@ -221,6 +218,8 @@ export default function Page({
   function cancelVersion() {
     setVersionParent(null);
     setAssetHash("");
+    setAssetFingerprint(null);
+    setProvenanceMatch(null);
     setFileName("");
     setSameOrgMatches([]);
     setDups([]);
@@ -234,69 +233,110 @@ export default function Page({
 
     setIssuedRecordId("");
     setFileName(file.name);
-
-    const hash = await hashFile(file);
-
-    setAssetHash(hash);
+    setAssetHash("");
+    setAssetFingerprint(null);
     setDups([]);
     setSameOrgMatches([]);
     setRelatedRecordId("");
     setRelationshipType("");
-
-    const r = await fetch(
-      `/api/organizations/${id}/asset-check?hash=${hash}`
-    );
-
-    if (!r.ok) {
-      setMsg("Unable to check existing institutional provenance.");
-      return;
-    }
-
-    const d = await r.json();
-    const sameOrganization = (d.sameOrganization || []) as InstitutionalRecordRef[];
-
-    if (sameOrganization.length) {
-      setSameOrgMatches(sameOrganization);
-      setMsg(
-        "This exact file is already registered by this institution. Identical bytes cannot be issued as a new version. View the existing record, or choose an active record below as the parent and then upload an updated file."
-      );
-      return;
-    }
-
-    if (versionParent && versionParent.asset_hash === hash) {
-      setMsg(
-        "The selected file is byte-for-byte identical to the parent record. A new version must contain a real change."
-      );
-      return;
-    }
-
-    if ((d.otherOrganizations || []).length) {
-      const otherMatches = d.otherOrganizations as InstitutionalRecordRef[];
-      const supersededMatches = otherMatches.filter(
-        record => record.status === "superseded"
-      );
-
-      setDups(otherMatches);
-      setRelatedRecordId(otherMatches[0].id);
-
-      setMsg(
-        supersededMatches.length
-          ? ""
-          : "This exact file is already registered by another institution. Review the existing record and declare the relationship before issuing."
-      );
-      return;
-    }
-
-    if (versionParent) {
-      setMsg(
-        `✓ Updated file selected. HPS will issue Version ${(versionParent.version || 1) + 1} and automatically mark ${versionParent.id} as superseded.`
-      );
-      return;
-    }
-
+    setProvenanceMatch(null);
     setMsg(
-      "✓ No prior institutional registration found for this exact file. You may proceed with issuance if this is the final approved document."
+      "Building HPS document fingerprint… Scanned files may take longer while OCR runs locally."
     );
+
+    try {
+      const fingerprint = await fingerprintFile(file);
+      const hash = fingerprint.exactSha256;
+
+      setAssetFingerprint(fingerprint);
+      setAssetHash(hash);
+
+      const r = await fetch(`/api/organizations/${id}/asset-check`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fingerprint })
+      });
+
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({}));
+        setMsg(
+          errorData.error || "Unable to check existing institutional provenance."
+        );
+        return;
+      }
+
+      const d = await r.json();
+      const sameOrganization = (d.sameOrganization || []) as InstitutionalRecordRef[];
+
+      if (sameOrganization.length) {
+        setSameOrgMatches(sameOrganization);
+        setMsg(
+          "This exact file is already registered by this institution. Identical bytes cannot be issued as a new version. View the existing record, or choose an active record below as the parent and then upload an updated file."
+        );
+        return;
+      }
+
+      if (versionParent && versionParent.asset_hash === hash) {
+        setMsg(
+          "The selected file is byte-for-byte identical to the parent record. A new version must contain a real change."
+        );
+        return;
+      }
+
+      if ((d.otherOrganizations || []).length) {
+        const otherMatches = d.otherOrganizations as InstitutionalRecordRef[];
+        const supersededMatches = otherMatches.filter(
+          record => record.status === "superseded"
+        );
+
+        setDups(otherMatches);
+        setRelatedRecordId(otherMatches[0].id);
+
+        setMsg(
+          supersededMatches.length
+            ? ""
+            : "This exact file is already registered by another institution. Review the existing record and declare the relationship before issuing."
+        );
+        return;
+      }
+
+      const relatedMatches = (d.relatedMatches || []) as any[];
+      const strongRelated = relatedMatches.find((candidate: any) => {
+        if (versionParent && candidate.id === versionParent.id) return false;
+        return (
+          candidate.comparison?.status === "verified_derivative" ||
+          (candidate.comparison?.status === "cross_format_match" &&
+            Number(candidate.comparison?.confidenceScore || 0) >= 75)
+        );
+      });
+
+      if (strongRelated) {
+        setProvenanceMatch(strongRelated);
+        setMsg(
+          `Strong existing provenance detected for the same underlying content (${strongRelated.comparison?.confidenceScore || 0}% confidence). Review ${strongRelated.id} before issuing. Use a digitization, transcription, format-conversion or version relationship rather than creating a fresh original.`
+        );
+        return;
+      }
+
+      if (versionParent) {
+        setMsg(
+          `✓ Updated file selected. HPS will issue Version ${(versionParent.version || 1) + 1} and automatically mark ${versionParent.id} as superseded.`
+        );
+        return;
+      }
+
+      const ocrNote = fingerprint.ocr?.used
+        ? ` OCR extracted text from ${fingerprint.ocr.pagesProcessed} page(s).`
+        : "";
+
+      setMsg(
+        `✓ No conflicting institutional provenance found. You may proceed with issuance if this is the final approved document.${ocrNote}`
+      );
+    } catch (e: any) {
+      setAssetHash("");
+      setAssetFingerprint(null);
+      setMsg(e?.message || "Unable to fingerprint this document.");
+    }
   }
 
   async function uploadEvidence() {
@@ -338,8 +378,8 @@ export default function Page({
       return setMsg("Enter the document title.");
     }
 
-    if (!assetHash) {
-      return setMsg("Choose the final document file first.");
+    if (!assetHash || !assetFingerprint) {
+      return setMsg("Choose the final document file and allow HPS to complete its resilient fingerprint first.");
     }
 
     if (sameOrgMatches.length) {
@@ -350,6 +390,12 @@ export default function Page({
 
     if (versionParent && versionParent.asset_hash === assetHash) {
       return setMsg("A new version cannot contain the exact same bytes as its parent.");
+    }
+
+    if (provenanceMatch && provenanceMatch.id !== versionParent?.id) {
+      return setMsg(
+        "Strong existing provenance was detected for this content. Review the existing HPS record and register the appropriate digitization, transcription, format-conversion or version relationship instead of issuing a fresh original."
+      );
     }
 
     if (
@@ -369,6 +415,7 @@ export default function Page({
       subjectName: subjectName || undefined,
       fileName: fileName || undefined,
       assetHash,
+      assetFingerprint,
       issuerPublicKey: pk,
       issuerKeyId: keyId,
       parentRecordId: versionParent?.id || null,
@@ -881,6 +928,40 @@ export default function Page({
             </div>
           )}
 
+          {provenanceMatch && (
+            <>
+              <div className="sectionLabel">03 · Related document provenance</div>
+
+              <div className="field full">
+                <div className="notice">
+                  <strong>Cross-format / derivative provenance detected</strong>
+                  <p>
+                    HPS found a strong relationship with {provenanceMatch.id}
+                    {typeof provenanceMatch.comparison?.confidenceScore === "number"
+                      ? ` · ${provenanceMatch.comparison.confidenceScore}% confidence`
+                      : ""}. The files are not byte-for-byte identical, so HPS will not silently issue this as a fresh original.
+                  </p>
+                  <div className="actions">
+                    <Link
+                      className="button darkButton"
+                      href={`/records/${provenanceMatch.id}`}
+                      target="_blank"
+                    >
+                      Review existing provenance
+                    </Link>
+                    <Link
+                      className="button darkButton"
+                      href="/verify/derivative"
+                      target="_blank"
+                    >
+                      Register digitization / transcription
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
           {sameOrgMatches.length > 0 && (
             <>
               <div className="sectionLabel">03 · Existing HPS record</div>
@@ -1181,10 +1262,12 @@ export default function Page({
               disabled={
                 !title ||
                 !assetHash ||
+                !assetFingerprint ||
                 !pk ||
                 !pass ||
                 sameOrgMatches.length > 0 ||
                 Boolean(versionParent && versionParent.asset_hash === assetHash) ||
+                Boolean(provenanceMatch && provenanceMatch.id !== versionParent?.id) ||
                 (dups.length > 0 && !relationshipType)
               }
               onClick={issue}

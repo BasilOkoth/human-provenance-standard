@@ -4,27 +4,24 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { getIssuerPublicKey, signIssuerClaim } from "@/lib/hps/issuer-keyvault";
+import { fingerprintFile, type HpsAssetFingerprintV1 } from "@/lib/hps/fingerprint-client";
 
 type Item = {
   id: string;
   file: File;
   fileName: string;
   hash: string;
+  fingerprint: HpsAssetFingerprintV1;
   title: string;
   documentType: string;
   subjectName: string;
-  status: "checking"|"ready"|"same_org"|"other_org"|"issuing"|"issued"|"failed";
+  status: "checking"|"ready"|"same_org"|"other_org"|"related"|"issuing"|"issued"|"failed";
   message?: string;
   existing?: any[];
   relatedRecordId?: string;
   relationshipType?: string;
   hpsId?: string;
 };
-
-async function sha256(file: File) {
-  const d = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2,"0")).join("");
-}
 
 function titleFromName(name: string) {
   return name.replace(/\.[^.]+$/,"").replaceAll("_"," ").replaceAll("-"," ").trim();
@@ -96,7 +93,8 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
   }
 
   async function prepareFile(file:File): Promise<Item> {
-    const hash = await sha256(file);
+    const fingerprint = await fingerprintFile(file);
+    const hash = fingerprint.exactSha256;
     const m = metadata(file.name);
 
     const base:Item = {
@@ -104,13 +102,18 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
       file,
       fileName: file.name,
       hash,
+      fingerprint,
       title: m.title,
       documentType: m.documentType,
       subjectName: m.subjectName,
       status: "ready"
     };
 
-    const r = await fetch(`/api/organizations/${id}/asset-check?hash=${hash}`, {cache:"no-store"});
+    const r = await fetch(`/api/organizations/${id}/asset-check`, {
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({fingerprint})
+    });
     if (!r.ok) return {...base,status:"failed",message:"Unable to check HPS registry."};
 
     const d = await r.json();
@@ -130,18 +133,40 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
       };
     }
 
-    return base;
+    const strongRelated = (d.relatedMatches || []).find((candidate:any) =>
+      candidate.comparison?.status === "verified_derivative" ||
+      (candidate.comparison?.status === "cross_format_match" && Number(candidate.comparison?.confidenceScore || 0) >= 75)
+    );
+
+    if (strongRelated) {
+      return {
+        ...base,
+        status:"related",
+        existing:[strongRelated],
+        message:`Strong related provenance exists as ${strongRelated.id} (${strongRelated.comparison?.confidenceScore || 0}% confidence). Review it and register digitization, transcription, format conversion or a version instead of issuing a fresh original.`
+      };
+    }
+
+    const ocrNote = fingerprint.ocr?.used
+      ? ` OCR processed ${fingerprint.ocr.pagesProcessed} page(s).`
+      : "";
+
+    return {
+      ...base,
+      message:`No conflicting provenance found.${ocrNote}`
+    };
   }
 
   async function addFiles(files?:FileList|null) {
     if (!files?.length) return;
     setBusy(true);
-    setMsg("");
+    setMsg("Building resilient fingerprints… scanned files may take longer while OCR runs locally.");
 
     try {
       const prepared:Item[] = [];
       for (const f of Array.from(files)) prepared.push(await prepareFile(f));
       setItems(current => [...current,...prepared]);
+      setMsg(`${prepared.length} document(s) fingerprinted and checked.`);
     } catch(e:any) {
       setMsg(e.message || "Unable to prepare files.");
     } finally {
@@ -179,6 +204,10 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
       throw new Error("Choose relationship for existing institutional match.");
     }
 
+    if (item.status === "related") {
+      throw new Error("This document has strong related provenance and cannot be issued as a fresh original.");
+    }
+
     const claim = {
       organizationId:id,
       organizationName:org.name,
@@ -187,6 +216,7 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
       subjectName:item.subjectName || undefined,
       fileName:item.fileName,
       assetHash:item.hash,
+      assetFingerprint:item.fingerprint,
       issuerPublicKey:pk,
       issuerKeyId:keyId,
       parentRecordId:null,
@@ -278,7 +308,7 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
       <header className="pageHead shell">
         <p className="eyebrow">HPS INSTITUTIONAL BULK ISSUANCE</p>
         <h1>{org.name}</h1>
-        <p>One batch, many independently verifiable HPS records. Every file is checked, signed and registered separately.</p>
+        <p>One batch, many independently verifiable HPS records. Every file is fingerprinted, checked, signed and registered separately.</p>
         <div className="actions">
           <Link className="button darkButton" href={`/institutional/${id}`}>Single-document issuance</Link>
         </div>
@@ -301,16 +331,16 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
 
           <div className="field">
             <label>Select multiple documents</label>
-            <input type="file" multiple onChange={e=>{addFiles(e.target.files);e.currentTarget.value="";}}/>
+            <input type="file" multiple disabled={busy} onChange={e=>{addFiles(e.target.files);e.currentTarget.value="";}}/>
           </div>
 
           <div className="field">
             <label>Optional metadata CSV</label>
-            <input type="file" accept=".csv,text/csv" onChange={e=>{loadCsv(e.target.files?.[0]);e.currentTarget.value="";}}/>
+            <input type="file" accept=".csv,text/csv" disabled={busy} onChange={e=>{loadCsv(e.target.files?.[0]);e.currentTarget.value="";}}/>
           </div>
 
           <div className="field full">
-            <p className="muted">CSV columns: <code>filename,title,document_type,subject_name</code></p>
+            <p className="muted">CSV columns: <code>filename,title,document_type,subject_name</code>. Scanned PDFs and images are OCR-processed locally when needed.</p>
           </div>
 
           <div className="sectionLabel">02 · Review</div>
@@ -320,6 +350,7 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
             <div><span>Ready</span><strong className="positive">{counts.ready || 0}</strong></div>
             <div><span>Already registered here</span><strong>{counts.same_org || 0}</strong></div>
             <div><span>Other institution match</span><strong>{counts.other_org || 0}</strong></div>
+            <div><span>Related provenance</span><strong>{counts.related || 0}</strong></div>
             <div><span>Issued</span><strong className="positive">{counts.issued || 0}</strong></div>
             <div><span>Failed</span><strong className={counts.failed ? "negative":""}>{counts.failed || 0}</strong></div>
           </div>
@@ -363,7 +394,18 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
                   </div>
                 )}
 
-                {item.message && <p className="muted">{item.message}</p>}
+                {item.status === "related" && item.existing?.[0] && (
+                  <div className="notice" style={{marginTop:12}}>
+                    <strong>Cross-format / derivative provenance detected</strong>
+                    <p>{item.message}</p>
+                    <div className="actions">
+                      <Link className="button darkButton" href={`/records/${item.existing[0].id}`} target="_blank">Review existing record</Link>
+                      <Link className="button darkButton" href="/verify/derivative" target="_blank">Register digitization / transcription</Link>
+                    </div>
+                  </div>
+                )}
+
+                {item.message && item.status !== "related" && <p className="muted">{item.message}</p>}
                 {item.hpsId && <p><Link href={`/records/${item.hpsId}`}>{item.hpsId}</Link></p>}
 
                 {item.status !== "issued" && (
@@ -394,7 +436,7 @@ export default function BulkPage({params}:{params:Promise<{id:string}>}) {
 
         <div className="notice" style={{marginTop:20}}>
           <strong>Bulk issuance rule</strong>
-          <p>Each document gets its own HPS record, SHA-256, institutional signature and registry countersignature. One failed or duplicate file does not stop unrelated valid files.</p>
+          <p>Each document gets its own HPS record, exact SHA-256, resilient fingerprint, institutional signature and registry countersignature. Strong cross-format matches are held for provenance review instead of being silently issued as new originals.</p>
         </div>
       </section>
     </main>
