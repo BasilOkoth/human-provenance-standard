@@ -97,7 +97,7 @@ export default function InstitutionalPage() {
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="e.g. Miyuga Secondary School"
+                placeholder="e.g. HPS Academy"
               />
             </div>
 
@@ -112,7 +112,7 @@ export default function InstitutionalPage() {
                       .replace(/[^a-z0-9-]/g, "-")
                   )
                 }
-                placeholder="miyuga-secondary-school"
+                placeholder="HPS Academy"
               />
             </div>
 
