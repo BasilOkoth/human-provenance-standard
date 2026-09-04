@@ -412,7 +412,172 @@ export default function Page({
     return (
       <main className="pageShell">
         <Nav />
-        <div className="loading">Loading institution…</div>
+
+        <section
+          className="shell"
+          style={{
+            minHeight: "68vh",
+            display: "grid",
+            placeItems: "center",
+            paddingTop: 56,
+            paddingBottom: 72
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 760,
+              border: "1px solid rgba(127,127,127,.16)",
+              borderRadius: 24,
+              padding: 30,
+              background: "rgba(127,127,127,.035)",
+              boxShadow: "0 18px 50px rgba(0,0,0,.04)"
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                marginBottom: 24
+              }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 14,
+                  display: "grid",
+                  placeItems: "center",
+                  border: "1px solid rgba(35,95,72,.18)",
+                  background: "rgba(35,95,72,.07)",
+                  fontWeight: 800,
+                  letterSpacing: ".08em",
+                  fontSize: 13
+                }}
+              >
+                HPS
+              </div>
+
+              <div>
+                <p
+                  className="micro"
+                  style={{
+                    margin: 0,
+                    marginBottom: 5,
+                    opacity: 0.58
+                  }}
+                >
+                  INSTITUTIONAL WORKSPACE
+                </p>
+
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 18,
+                    letterSpacing: "-.01em"
+                  }}
+                >
+                  Preparing secure institutional access
+                </strong>
+              </div>
+            </div>
+
+            <div
+              style={{
+                height: 1,
+                background: "rgba(127,127,127,.14)",
+                marginBottom: 24
+              }}
+            />
+
+            <div
+              style={{
+                display: "grid",
+                gap: 13
+              }}
+            >
+              <div
+                style={{
+                  height: 14,
+                  width: "44%",
+                  borderRadius: 999,
+                  background: "rgba(127,127,127,.12)"
+                }}
+              />
+              <div
+                style={{
+                  height: 28,
+                  width: "72%",
+                  borderRadius: 10,
+                  background: "rgba(127,127,127,.09)"
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  marginTop: 3
+                }}
+              >
+                <div
+                  style={{
+                    height: 30,
+                    width: 142,
+                    borderRadius: 999,
+                    background: "rgba(35,95,72,.10)"
+                  }}
+                />
+                <div
+                  style={{
+                    height: 30,
+                    width: 112,
+                    borderRadius: 999,
+                    background: "rgba(127,127,127,.09)"
+                  }}
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 28,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                fontSize: 13,
+                opacity: 0.58
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "currentColor",
+                  animation: "hpsPulse 1.2s ease-in-out infinite"
+                }}
+              />
+              Verifying institutional permissions and issuer access
+            </div>
+
+            <style jsx>{`
+              @keyframes hpsPulse {
+                0%,
+                100% {
+                  opacity: 0.28;
+                  transform: scale(0.9);
+                }
+                50% {
+                  opacity: 0.9;
+                  transform: scale(1);
+                }
+              }
+            `}</style>
+          </div>
+        </section>
       </main>
     );
   }
