@@ -8,6 +8,7 @@ import {
   verifyDetachedCanonical,
 } from "@/lib/hps/crypto";
 import RevokeRecord from "@/components/RevokeRecord";
+import RecordLifecycle from "@/components/RecordLifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ export default async function RecordPage({
 
       const base =
         process.env.NEXT_PUBLIC_APP_URL ||
-        "https://human-provenance-standard.onrender.com";
+        "https://humanprovenancestandard.org";
 
       qr = await QRCode.toDataURL(`${base}/records/${id}`, {
         width: 320,
@@ -160,7 +161,18 @@ export default async function RecordPage({
 
       {data.status === "superseded" && (
         <div className="supersededBanner">
-          SUPERSEDED · A newer version exists.
+          SUPERSEDED ·{" "}
+          {data.superseded_by_id ? (
+            <>
+              This record has been replaced by{" "}
+              <Link href={`/records/${data.superseded_by_id}`}>
+                {data.superseded_by_id}
+              </Link>
+              .
+            </>
+          ) : (
+            "A newer or replacement record exists."
+          )}
         </div>
       )}
 
@@ -243,6 +255,28 @@ export default async function RecordPage({
             </dt>
             <dd>{data.creator_name}</dd>
           </div>
+
+          {data.parent_record_id && (
+            <div>
+              <dt>Previous version</dt>
+              <dd>
+                <Link href={`/records/${data.parent_record_id}`}>
+                  {data.parent_record_id}
+                </Link>
+              </dd>
+            </div>
+          )}
+
+          {data.superseded_by_id && (
+            <div>
+              <dt>Replacement / newer version</dt>
+              <dd>
+                <Link href={`/records/${data.superseded_by_id}`}>
+                  {data.superseded_by_id}
+                </Link>
+              </dd>
+            </div>
+          )}
 
           {m.contributions?.length > 0 && (
             <>
@@ -408,6 +442,14 @@ export default async function RecordPage({
             </Link>
           )}
         </div>
+
+        {data.record_kind === "institutional_document" && (
+          <RecordLifecycle
+            recordId={id}
+            status={data.status}
+            issuerOrgId={data.issuer_org_id}
+          />
+        )}
 
         <RevokeRecord recordId={id} status={data.status} />
 
