@@ -422,20 +422,108 @@ export default function Page({
       <Nav />
 
       <header className="pageHead shell">
-        <p className="eyebrow">HPS INSTITUTIONAL ISSUER</p>
-        <h1>{org.name}</h1>
-        <p>
-          Verification: <strong>{org.verification_status}</strong> · Your role:{" "}
-          <strong>{role}</strong>
-        </p>
+        <p className="eyebrow">HPS · INSTITUTIONAL ISSUANCE</p>
 
-        <div className="actions">
-          <Link
-            className="button primary"
-            href={`/institutional/${id}/bulk`}
-          >
-            Bulk issuance
-          </Link>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            gap: 24,
+            flexWrap: "wrap"
+          }}
+        >
+          <div>
+            <h1 style={{ marginBottom: 16 }}>{org.name}</h1>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 10
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(35, 95, 72, .24)",
+                  background: "rgba(35, 95, 72, .07)",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: ".09em",
+                  textTransform: "uppercase"
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 18,
+                    height: 18,
+                    display: "inline-grid",
+                    placeItems: "center",
+                    borderRadius: "50%",
+                    background: "rgba(35, 95, 72, .13)",
+                    fontSize: 11
+                  }}
+                >
+                  ✓
+                </span>
+                {org.verification_status === "verified"
+                  ? "Verified institution"
+                  : org.verification_status.replaceAll("_", " ")}
+              </span>
+
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(127, 127, 127, .22)",
+                  background: "rgba(127, 127, 127, .055)",
+                  fontSize: 11,
+                  fontWeight: 750,
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase"
+                }}
+              >
+                {role === "admin"
+                  ? "Administrator"
+                  : role === "issuer"
+                    ? "Authorized issuer"
+                    : role
+                      ? role.replaceAll("_", " ")
+                      : "Member"}
+              </span>
+            </div>
+          </div>
+
+          <div className="actions" style={{ margin: 0 }}>
+            <Link
+              className="button primary"
+              href={`/institutional/${id}/bulk`}
+            >
+              Bulk issuance
+            </Link>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 22,
+            paddingTop: 16,
+            borderTop: "1px solid rgba(127, 127, 127, .16)",
+            fontSize: 13,
+            opacity: 0.58,
+            letterSpacing: ".02em"
+          }}
+        >
+          Authorized institutional provenance workspace
         </div>
       </header>
 
