@@ -271,10 +271,18 @@ export default function Page({
     }
 
     if ((d.otherOrganizations || []).length) {
-      setDups(d.otherOrganizations);
-      setRelatedRecordId(d.otherOrganizations[0].id);
+      const otherMatches = d.otherOrganizations as InstitutionalRecordRef[];
+      const supersededMatches = otherMatches.filter(
+        record => record.status === "superseded"
+      );
+
+      setDups(otherMatches);
+      setRelatedRecordId(otherMatches[0].id);
+
       setMsg(
-        "This exact file is already registered by another institution. Review the existing record and declare the relationship before issuing."
+        supersededMatches.length
+          ? "Lifecycle warning: this exact file matches a SUPERSEDED HPS record from another institution. The historical record remains verifiable, but it has been replaced. Review the record lifecycle before declaring a relationship."
+          : "This exact file is already registered by another institution. Review the existing record and declare the relationship before issuing."
       );
       return;
     }
@@ -932,20 +940,146 @@ export default function Page({
                 04 · Existing asset relationship
               </div>
 
-              <div className="field full">
-                {dups.map((d: any) => (
-                  <label
-                    key={d.id}
-                    style={{ display: "block", marginBottom: 8 }}
+              {dups.some((d: any) => d.status === "superseded") && (
+                <div className="field full">
+                  <div
+                    className="notice"
+                    style={{
+                      borderColor: "rgba(160, 112, 26, .28)",
+                      background: "rgba(160, 112, 26, .06)"
+                    }}
                   >
-                    <input
-                      type="radio"
-                      checked={relatedRecordId === d.id}
-                      onChange={() => setRelatedRecordId(d.id)}
-                    />{" "}
-                    {d.id} · {d.creator_name} · {d.title}
-                  </label>
-                ))}
+                    <strong>Superseded provenance detected</strong>
+                    <p>
+                      This exact asset matches an HPS record that the original
+                      institution has formally replaced. The historical record
+                      remains cryptographically verifiable, but it is no longer
+                      that institution&apos;s current version. Review the
+                      replacement before declaring how this institution relates
+                      to the historical asset.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="field full">
+                <div style={{ display: "grid", gap: 10 }}>
+                  {dups.map((d: any) => {
+                    const selected = relatedRecordId === d.id;
+                    const superseded = d.status === "superseded";
+
+                    return (
+                      <label
+                        key={d.id}
+                        style={{
+                          display: "block",
+                          padding: 16,
+                          borderRadius: 14,
+                          cursor: "pointer",
+                          border: selected
+                            ? "1px solid rgba(35,95,72,.38)"
+                            : "1px solid rgba(127,127,127,.18)",
+                          background: selected
+                            ? "rgba(35,95,72,.045)"
+                            : "rgba(127,127,127,.025)"
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 12
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            checked={selected}
+                            onChange={() => setRelatedRecordId(d.id)}
+                            style={{ marginTop: 4 }}
+                          />
+
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                alignItems: "center",
+                                flexWrap: "wrap"
+                              }}
+                            >
+                              <strong>{d.title || d.id}</strong>
+
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  padding: "5px 9px",
+                                  borderRadius: 999,
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  letterSpacing: ".08em",
+                                  textTransform: "uppercase",
+                                  border: superseded
+                                    ? "1px solid rgba(160,112,26,.32)"
+                                    : "1px solid rgba(35,95,72,.24)",
+                                  background: superseded
+                                    ? "rgba(160,112,26,.08)"
+                                    : "rgba(35,95,72,.07)"
+                                }}
+                              >
+                                {superseded ? "Superseded" : "Active"}
+                              </span>
+                            </div>
+
+                            <div
+                              className="muted"
+                              style={{ marginTop: 6, fontSize: 13 }}
+                            >
+                              {d.id}
+                              {d.creator_name ? ` · ${d.creator_name}` : ""}
+                              {d.version ? ` · Version ${d.version}` : ""}
+                            </div>
+
+                            {superseded && (
+                              <div
+                                style={{
+                                  marginTop: 10,
+                                  fontSize: 13,
+                                  lineHeight: 1.5
+                                }}
+                              >
+                                This is a historical HPS record and has been
+                                replaced.
+                                {d.superseded_by_id ? (
+                                  <>
+                                    {" "}
+                                    <Link
+                                      href={`/records/${d.superseded_by_id}`}
+                                      target="_blank"
+                                    >
+                                      View current replacement →
+                                    </Link>
+                                  </>
+                                ) : null}
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 8 }}>
+                              <Link
+                                href={`/records/${d.id}`}
+                                target="_blank"
+                                onClick={event => event.stopPropagation()}
+                              >
+                                View matching HPS record →
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="field">
