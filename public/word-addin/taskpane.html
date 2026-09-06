@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HPS Trusted Research Agent</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+  <link rel="stylesheet" href="/word-addin/taskpane.css" />
+</head>
+<body>
+  <main class="panel">
+    <p class="eyebrow">HPS · WORD INTEGRATION v0.4</p>
+    <h1>Trusted Research Agent</h1>
+    <p class="intro">Audit the manuscript where you write it. HPS records only actions you explicitly request.</p>
+
+    <section class="card">
+      <h2>Current manuscript</h2>
+      <div class="actions">
+        <button id="readDoc" class="primary">Audit document</button>
+        <button id="readSelection">Audit selection</button>
+      </div>
+      <p id="docState" class="muted">No manuscript has been read.</p>
+    </section>
+
+    <section class="card" id="auditCard" hidden>
+      <h2>Integrity pre-check</h2>
+      <div class="metrics">
+        <div><strong id="claimCount">0</strong><span>claim-like sentences</span></div>
+        <div><strong id="citationCount">0</strong><span>citation markers</span></div>
+        <div><strong id="uncitedCount">0</strong><span>possible uncited claims</span></div>
+      </div>
+      <p class="hash">SHA-256 <span id="hash"></span></p>
+      <div id="warnings" class="warnings"></div>
+      <p class="disclaimer">These are review signals, not findings of truth, falsity or misconduct.</p>
+    </section>
+
+    <section class="card">
+      <h2>AI assistance</h2>
+      <label>Tool<input id="aiTool" value="ChatGPT" /></label>
+      <label>What did it do?<textarea id="aiTask" rows="3" placeholder="e.g. Restructured a paragraph; summarized candidate sources"></textarea></label>
+      <button id="recordAi">Record disclosure</button>
+      <p id="aiState" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>Continue in HPS</h2>
+      <p>Transfer the document or selection into the HPS document-aware audit. The manuscript hash and Word import event become part of the provenance trail.</p>
+      <button id="sendHps" class="primary" disabled>Open full HPS audit</button>
+    </section>
+
+    <p id="status" class="status"></p>
+  </main>
+  <script src="/word-addin/taskpane.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HPS Research Agent</title>
+  <style>
+    body{font:14px system-ui,sans-serif;margin:0;padding:16px;width:340px;background:#0b0d10;color:#f7f7f5}
+    h1{font-size:18px;margin:0 0 6px}.muted{opacity:.68;font-size:12px;line-height:1.45}
+    button,input,textarea{box-sizing:border-box;width:100%;margin-top:10px;border-radius:10px;border:1px solid #363b43;background:#15181d;color:#fff;padding:10px}
+    button{cursor:pointer;font-weight:700;background:#f4f1e8;color:#111}.secondary{background:#15181d;color:#fff}
+    .count{margin-top:12px;padding:9px;border:1px solid #2b3037;border-radius:10px}.ok{font-size:12px;margin-top:8px;min-height:16px}
+  </style>
+</head>
+<body>
+  <h1>HPS Research Agent</h1>
+  <div class="muted">Nothing is captured automatically. Save only research events you want in the provenance trail.</div>
+  <button id="saveSource">Save current page as source</button>
+  <input id="tool" placeholder="AI tool, e.g. ChatGPT" />
+  <textarea id="task" rows="3" placeholder="Describe the AI assistance you want to disclose"></textarea>
+  <button id="saveAi" class="secondary">Record AI assistance</button>
+  <button id="checkpoint" class="secondary">Create checkpoint</button>
+  <button id="export" class="secondary">Export trail JSON</button>
+  <div id="count" class="count">0 provenance events</div>
+  <div id="status" class="ok"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

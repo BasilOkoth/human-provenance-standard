@@ -1,0 +1,7 @@
+Apply to src/components/Nav.tsx:
+
+Desktop nav: add after Create
+  <Link href="/research-agent">Research Agent</Link>
+
+Mobile nav: add after Create
+  <Link href="/research-agent" onClick={closeMenu}>Research Agent</Link>

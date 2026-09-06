@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "HPS Trusted Research Agent",
+  "version": "0.1.0",
+  "description": "Capture user-approved research provenance events for HPS.",
+  "permissions": ["activeTab", "storage"],
+  "action": {
+    "default_title": "HPS Trusted Research Agent",
+    "default_popup": "popup.html"
+  }
+}
