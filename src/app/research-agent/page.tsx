@@ -156,6 +156,55 @@ function citationLabel(source: ResearchEvent) {
   return `${author}${year}${meta.doi ? ` · ${meta.doi}` : ""}`;
 }
 
+
+function sourceDisplay(source: ResearchEvent) {
+  const rawTitle = (source.title || "").trim();
+  const rawUrl = (source.url || "").trim();
+
+  let host = "";
+  let derivedTitle = "";
+
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      host = parsed.hostname.replace(/^www\./, "");
+      const finalPart = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+      derivedTitle = finalPart
+        .replace(/^\d+[_-]?/, "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    } catch {}
+  }
+
+  const titleLooksLikeUrl = /^https?:\/\//i.test(rawTitle);
+  const title =
+    !titleLooksLikeUrl && rawTitle
+      ? rawTitle
+      : derivedTitle || (host ? `Source from ${host}` : "Captured research source");
+
+  return {
+    title,
+    host: host || "Source",
+    url: rawUrl,
+  };
+}
+
+function doiLabel(status?: DoiStatus) {
+  if (status === "verified") return "DOI verified";
+  if (status === "pending") return "DOI checking";
+  if (status === "not-found") return "DOI not found";
+  if (status === "error") return "DOI check failed";
+  return "DOI not added";
+}
+
+function originLabel(origin?: SourceOrigin) {
+  if (origin === "publisher-record") return "Original record";
+  if (origin === "repository") return "Repository copy";
+  if (origin === "aggregator") return "Aggregator copy";
+  return "Source origin unknown";
+}
+
 function eventIcon(type: EventType) {
   if (type === "source") return "S";
   if (type === "claim") return "C";
@@ -991,89 +1040,134 @@ export default function ResearchAgentPage() {
                 </section>
               </div>
 
-              <section className="raSection">
-                <div className="raSectionHead">
+              <section className="raSection raEvidenceSection">
+                <div className="raSectionHead raEvidenceHead">
                   <div>
-                    <p className="raKicker">EVIDENCE LIBRARY</p>
-                    <h2>Your captured sources</h2>
+                    <p className="raKicker">SOURCES</p>
+                    <h2>Evidence used in this research</h2>
+                    <p className="raSectionLead">
+                      Captured sources are kept separate from the claims they support. Verify the scholarly record and record what each source actually contributes.
+                    </p>
                   </div>
 
-                  <span className="raCountBadge">{sources.length} sources</span>
+                  <span className="raCountBadge">
+                    {sources.length} source{sources.length === 1 ? "" : "s"}
+                  </span>
                 </div>
 
                 {sources.length ? (
-                  <div className="raSourceGrid">
-                    {sources.map((source) => (
-                      <article key={source.id} className="raSourceCard">
-                        <div className="raSourceTop">
-                          <div className="raSourceIcon">S</div>
-                          <div className="raSourceMeta">
-                            <span className={`raPill ${source.metadata?.doiStatus === "verified" ? "verified" : ""}`}>
-                              {source.metadata?.doiStatus === "verified" ? "DOI VERIFIED" : (source.metadata?.doiStatus || "NO DOI").toUpperCase()}
-                            </span>
-                            <span className="raPill">
-                              {(source.metadata?.origin || "unknown").replace("-", " ").toUpperCase()}
-                            </span>
+                  <div className="raCompactSources">
+                    {sources.map((source) => {
+                      const display = sourceDisplay(source);
+                      const isAggregator = source.metadata?.origin === "aggregator";
+                      const isRepository = source.metadata?.origin === "repository";
+                      const verified = source.metadata?.doiStatus === "verified";
+
+                      return (
+                        <article key={source.id} className="raCompactSourceCard">
+                          <div className="raCompactSourceIcon">S</div>
+
+                          <div className="raCompactSourceMain">
+                            <div className="raCompactSourceHeading">
+                              <div className="raCompactSourceTitleWrap">
+                                <p className="raSourceHost">{display.host}</p>
+                                <h3>{display.title}</h3>
+                              </div>
+
+                              <div className="raCompactBadges">
+                                <span className={`raStatusBadge ${verified ? "good" : ""}`}>
+                                  {doiLabel(source.metadata?.doiStatus)}
+                                </span>
+                                <span className={`raStatusBadge ${isAggregator ? "attention" : verified ? "good" : ""}`}>
+                                  {originLabel(source.metadata?.origin)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {display.url && (
+                              <a
+                                className="raSourceUrl"
+                                href={display.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={display.url}
+                              >
+                                {display.url}
+                              </a>
+                            )}
+
+                            <div className="raCompactEvidence">
+                              <div className="raCompactEvidenceLabel">Evidence note</div>
+                              <p className={!source.evidenceNote ? "empty" : ""}>
+                                {source.evidenceNote || "No evidence note yet. Add one when you record what this source supports."}
+                              </p>
+                            </div>
+
+                            {(isAggregator || isRepository) && (
+                              <div className="raSourceWarning">
+                                <span>!</span>
+                                <div>
+                                  <strong>{isAggregator ? "Secondary access point" : "Repository version"}</strong>
+                                  <p>
+                                    {isAggregator
+                                      ? "This source was captured from an aggregator. HPS recommends checking the DOI or original publisher record before relying on it."
+                                      : "This appears to be a repository copy. Confirm the canonical scholarly record when possible."}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="raCompactSourceFooter">
+                              <div className="raSourceFacts">
+                                {source.metadata?.doi && (
+                                  <span><strong>DOI</strong> {source.metadata.doi}</span>
+                                )}
+                                {source.metadata?.publisher && (
+                                  <span><strong>Publisher</strong> {source.metadata.publisher}</span>
+                                )}
+                                {source.metadata?.publishedYear && (
+                                  <span><strong>Year</strong> {source.metadata.publishedYear}</span>
+                                )}
+                              </div>
+
+                              <div className="raCardActions">
+                                {source.metadata?.doi && (
+                                  <button
+                                    className="raSmallButton"
+                                    onClick={() => recheckDoi(source)}
+                                    disabled={checkingDoi}
+                                  >
+                                    {verified ? "Recheck DOI" : "Verify DOI"}
+                                  </button>
+                                )}
+
+                                {source.metadata?.canonicalUrl && (
+                                  <a
+                                    className="raSmallButton primary"
+                                    href={source.metadata.canonicalUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open original ↗
+                                  </a>
+                                )}
+
+                                {!source.metadata?.canonicalUrl && display.url && (
+                                  <a
+                                    className="raSmallButton"
+                                    href={display.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open source ↗
+                                  </a>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-
-                        <h3>{source.title}</h3>
-
-                        <p className="raEvidenceNote">
-                          {source.evidenceNote || "No evidence note recorded yet."}
-                        </p>
-
-                        <dl className="raSourceDetails">
-                          {source.metadata?.doi && (
-                            <>
-                              <dt>DOI</dt>
-                              <dd>{source.metadata.doi}</dd>
-                            </>
-                          )}
-
-                          {source.metadata?.publisher && (
-                            <>
-                              <dt>Publisher</dt>
-                              <dd>{source.metadata.publisher}</dd>
-                            </>
-                          )}
-
-                          {source.metadata?.publishedYear && (
-                            <>
-                              <dt>Year</dt>
-                              <dd>{source.metadata.publishedYear}</dd>
-                            </>
-                          )}
-                        </dl>
-
-                        {source.metadata?.originReason && (
-                          <p className="raOriginReason">{source.metadata.originReason}</p>
-                        )}
-
-                        <div className="raCardActions">
-                          {source.metadata?.doi && (
-                            <button
-                              className="raSmallButton"
-                              onClick={() => recheckDoi(source)}
-                              disabled={checkingDoi}
-                            >
-                              Recheck DOI
-                            </button>
-                          )}
-
-                          {source.metadata?.canonicalUrl && (
-                            <a
-                              className="raSmallButton"
-                              href={source.metadata.canonicalUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open canonical ↗
-                            </a>
-                          )}
-                        </div>
-                      </article>
-                    ))}
+                        </article>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="raSectionEmpty">
@@ -2049,13 +2143,254 @@ export default function ResearchAgentPage() {
           font-weight:900;
         }
 
+
+        .raEvidenceSection{
+          padding:26px 28px;
+        }
+
+        .raEvidenceHead{
+          padding-bottom:18px;
+        }
+
+        .raCompactSources{
+          display:grid;
+          gap:10px;
+          margin-top:18px;
+        }
+
+        .raCompactSourceCard{
+          display:grid;
+          grid-template-columns:42px minmax(0,1fr);
+          gap:15px;
+          border:1px solid #2c2f34;
+          background:#0d0f11;
+          border-radius:15px;
+          padding:18px;
+          min-width:0;
+        }
+
+        .raCompactSourceIcon{
+          display:grid;
+          place-items:center;
+          width:38px;
+          height:38px;
+          border-radius:11px;
+          border:1px solid #393c42;
+          background:#16181a;
+          color:#c69a5b;
+          font-weight:850;
+        }
+
+        .raCompactSourceMain{
+          min-width:0;
+        }
+
+        .raCompactSourceHeading{
+          display:flex;
+          justify-content:space-between;
+          align-items:flex-start;
+          gap:18px;
+          min-width:0;
+        }
+
+        .raCompactSourceTitleWrap{
+          min-width:0;
+          flex:1;
+        }
+
+        .raSourceHost{
+          margin:0 0 4px !important;
+          color:#6f7379 !important;
+          font-size:10px !important;
+          text-transform:uppercase;
+          letter-spacing:.09em;
+        }
+
+        .raCompactSourceHeading h3{
+          margin:0;
+          max-width:760px;
+          color:#f0eee8;
+          font-size:17px;
+          line-height:1.35;
+          font-weight:650;
+          overflow-wrap:anywhere;
+          word-break:break-word;
+        }
+
+        .raCompactBadges{
+          display:flex;
+          gap:6px;
+          flex-wrap:wrap;
+          justify-content:flex-end;
+          flex:0 0 auto;
+        }
+
+        .raStatusBadge{
+          border:1px solid #34373d;
+          background:#141619;
+          border-radius:999px;
+          color:#858990;
+          padding:5px 8px;
+          font-size:9px;
+          white-space:nowrap;
+        }
+
+        .raStatusBadge.good{
+          color:#91b99c;
+          border-color:#34503d;
+          background:#111b15;
+        }
+
+        .raStatusBadge.attention{
+          color:#d2a86b;
+          border-color:#57452d;
+          background:#19140e;
+        }
+
+        .raSourceUrl{
+          display:block;
+          max-width:100%;
+          margin-top:8px;
+          color:#71757b;
+          font-size:10px;
+          line-height:1.4;
+          text-decoration:none;
+          overflow:hidden;
+          text-overflow:ellipsis;
+          white-space:nowrap;
+        }
+
+        .raSourceUrl:hover{
+          color:#b9905d;
+        }
+
+        .raCompactEvidence{
+          margin-top:13px;
+          padding:11px 12px;
+          border:1px solid #25282d;
+          background:#111315;
+          border-radius:10px;
+        }
+
+        .raCompactEvidenceLabel{
+          color:#72767c;
+          font-size:9px;
+          font-weight:800;
+          letter-spacing:.09em;
+          text-transform:uppercase;
+        }
+
+        .raCompactEvidence p{
+          margin:5px 0 0;
+          color:#c3c5c7;
+          font-size:12px;
+          line-height:1.5;
+        }
+
+        .raCompactEvidence p.empty{
+          color:#6d7076;
+          font-style:italic;
+        }
+
+        .raSourceWarning{
+          display:grid;
+          grid-template-columns:24px 1fr;
+          gap:9px;
+          align-items:flex-start;
+          margin-top:10px;
+          padding:10px 11px;
+          border:1px solid #493b29;
+          background:#16120d;
+          border-radius:10px;
+        }
+
+        .raSourceWarning > span{
+          display:grid;
+          place-items:center;
+          width:22px;
+          height:22px;
+          border-radius:7px;
+          background:#2a2014;
+          color:#d5a96a;
+          font-weight:900;
+          font-size:11px;
+        }
+
+        .raSourceWarning strong{
+          display:block;
+          color:#d5c29f;
+          font-size:11px;
+        }
+
+        .raSourceWarning p{
+          margin:3px 0 0;
+          color:#8e816d;
+          font-size:11px;
+          line-height:1.45;
+        }
+
+        .raCompactSourceFooter{
+          display:flex;
+          justify-content:space-between;
+          align-items:flex-end;
+          gap:16px;
+          margin-top:11px;
+          padding-top:11px;
+          border-top:1px solid #24272b;
+        }
+
+        .raSourceFacts{
+          display:flex;
+          gap:12px;
+          flex-wrap:wrap;
+          color:#797d83;
+          font-size:10px;
+          min-width:0;
+        }
+
+        .raSourceFacts strong{
+          color:#a7aaae;
+          margin-right:3px;
+        }
+
+        .raCompactSourceFooter .raCardActions{
+          margin:0;
+          flex:0 0 auto;
+        }
+
+        .raSmallButton.primary{
+          color:#111315;
+          background:#e8e2d7;
+          border-color:#e8e2d7;
+        }
+
         @media (max-width:1050px){
           .raWorkspace{grid-template-columns:1fr 1fr}
           .raAiPanel{grid-column:1 / -1}
           .raMetrics{grid-template-columns:repeat(3,1fr)}
         }
 
+
         @media (max-width:760px){
+          .raCompactSourceHeading,
+          .raCompactSourceFooter{
+            flex-direction:column;
+            align-items:flex-start;
+          }
+
+          .raCompactBadges{
+            justify-content:flex-start;
+          }
+
+          .raCompactSourceCard{
+            grid-template-columns:1fr;
+          }
+
+          .raSourceUrl{
+            white-space:normal;
+            overflow-wrap:anywhere;
+          }
+
           .raWrap{padding-top:34px}
           .raHero{grid-template-columns:1fr;gap:18px;padding-top:30px}
           .raHeroTrust{align-items:flex-start}
