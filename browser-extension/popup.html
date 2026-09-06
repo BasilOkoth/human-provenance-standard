@@ -7,51 +7,104 @@
   <style>
     :root{color-scheme:dark}
     *{box-sizing:border-box}
-    body{font:14px system-ui,-apple-system,Segoe UI,sans-serif;margin:0;padding:16px;width:360px;background:#0b0d10;color:#f7f7f5}
-    .brand{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-    .mark{width:34px;height:34px;border-radius:11px;background:#c81e1e;color:#fff;display:grid;place-items:center;font-size:21px;font-weight:900;box-shadow:0 0 0 1px rgba(255,255,255,.12) inset}
-    h1{font-size:18px;margin:0}
-    .muted{opacity:.68;font-size:12px;line-height:1.45}
-    .section{margin-top:14px;padding-top:12px;border-top:1px solid #242932}
-    button,input,textarea{box-sizing:border-box;width:100%;margin-top:9px;border-radius:10px;border:1px solid #363b43;background:#15181d;color:#fff;padding:10px}
-    button{cursor:pointer;font-weight:750;background:#f4f1e8;color:#111}
-    button.primary{background:#c81e1e;color:white;border-color:#c81e1e}
-    button.secondary{background:#15181d;color:#fff}
-    button:disabled{opacity:.5;cursor:not-allowed}
-    .count{margin-top:12px;padding:9px;border:1px solid #2b3037;border-radius:10px}
-    .ok{font-size:12px;margin-top:8px;min-height:16px;color:#d7e8d7}
-    .review{font-size:12px;margin-top:8px;opacity:.85}
+    body{
+      width:330px;
+      margin:0;
+      padding:13px;
+      background:#0b0d10;
+      color:#f7f7f5;
+      font:13px system-ui,-apple-system,Segoe UI,sans-serif
+    }
+    .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .brand{display:flex;align-items:center;gap:9px}
+    .mark{
+      display:grid;place-items:center;
+      width:30px;height:30px;border-radius:9px;
+      background:#c81e1e;color:#fff;font-weight:900;font-size:18px
+    }
+    h1{font-size:15px;margin:0}
+    .sub{font-size:10px;color:#7f8389;margin-top:2px}
+    .privacy{
+      margin:10px 0 11px;padding:8px 9px;
+      border:1px solid #272b31;border-radius:9px;
+      color:#83878e;font-size:10px;line-height:1.35
+    }
+    button,input,textarea{
+      width:100%;border-radius:9px;border:1px solid #343941;
+      background:#14171b;color:#fff;font:inherit
+    }
+    button{
+      min-height:40px;padding:9px 11px;cursor:pointer;font-weight:750
+    }
+    button:hover{border-color:#555b64}
+    .primary{background:#eee9df;color:#111;border-color:#eee9df}
+    .red{background:#d91f24;color:#fff;border-color:#d91f24}
+    .secondary{background:#14171b;color:#f4f4f2}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}
+    .aiForm{
+      display:none;margin-top:7px;padding:9px;
+      border:1px solid #292e35;border-radius:10px;background:#0e1013
+    }
+    .aiForm.open{display:block}
+    input,textarea{padding:9px 10px;margin-bottom:7px;outline:none}
+    textarea{resize:vertical;min-height:66px}
+    input:focus,textarea:focus{border-color:#8b6a42}
+    .review{
+      display:none;margin-top:7px;
+      border-color:#75572f;background:#1a150f;color:#e6c998
+    }
+    .review.show{display:block}
+    .meta{
+      display:flex;align-items:center;justify-content:space-between;
+      gap:10px;margin-top:9px;padding-top:9px;border-top:1px solid #24282e;
+      color:#969aa0;font-size:11px
+    }
+    .status{min-height:15px;margin-top:6px;color:#9fbda7;font-size:10px;line-height:1.35}
+    details{margin-top:5px}
+    summary{cursor:pointer;color:#73777d;font-size:10px;user-select:none}
+    details button{margin-top:6px;min-height:34px;font-size:11px}
+    .badge{
+      border:1px solid #30343a;border-radius:999px;
+      padding:4px 7px;color:#b7b9bd;white-space:nowrap
+    }
   </style>
 </head>
 <body>
-  <div class="brand">
-    <div class="mark">H</div>
-    <div>
-      <h1>HPS Research Agent</h1>
-      <div class="muted">Human-approved provenance capture</div>
+  <div class="top">
+    <div class="brand">
+      <div class="mark">H</div>
+      <div>
+        <h1>HPS Research Agent</h1>
+        <div class="sub">Explicit research provenance</div>
+      </div>
     </div>
+    <div id="count" class="badge">0 events</div>
   </div>
 
-  <div class="muted">Nothing is captured automatically. Save only research events you want in the provenance trail.</div>
+  <div class="privacy">Nothing is captured automatically. You decide what enters the trail.</div>
 
-  <button id="saveSource">Save current page as source</button>
+  <button id="saveSource" class="primary">Save current page as source</button>
 
-  <div class="section">
+  <button id="toggleAi" class="secondary" style="margin-top:7px">Record AI assistance</button>
+  <div id="aiForm" class="aiForm">
     <input id="tool" placeholder="AI tool, e.g. ChatGPT" />
-    <textarea id="task" rows="3" placeholder="Describe the AI assistance you want to disclose"></textarea>
-    <button id="saveAi" class="secondary">Record AI assistance</button>
-    <button id="reviewAi" class="secondary">Human-review latest AI event</button>
-    <div id="reviewState" class="review"></div>
+    <textarea id="task" rows="2" placeholder="What did the AI help you do?"></textarea>
+    <button id="saveAi" class="primary">Save AI disclosure</button>
   </div>
 
-  <div class="section">
-    <button id="checkpoint" class="secondary">Create checkpoint</button>
-    <button id="sendHps" class="primary">Send trail to HPS</button>
+  <button id="reviewAi" class="review">Human-review latest AI event</button>
+
+  <div class="row">
+    <button id="checkpoint" class="secondary">Checkpoint</button>
+    <button id="sendHps" class="red">Send to HPS</button>
+  </div>
+
+  <details>
+    <summary>More</summary>
     <button id="export" class="secondary">Export trail JSON</button>
-  </div>
+  </details>
 
-  <div id="count" class="count">0 provenance events</div>
-  <div id="status" class="ok"></div>
+  <div id="status" class="status"></div>
 
   <script src="popup.js"></script>
 </body>
