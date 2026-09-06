@@ -1274,7 +1274,16 @@ export default function ResearchAgentPage() {
                           <div className="raTimelineHead">
                             <div>
                               <span className="raEventType">{event.type.replace("-", " ")}</span>
-                              <h3>{event.title}</h3>
+                              <h3>
+                                {event.type === "source"
+                                  ? sourceDisplay(event).title
+                                  : event.title}
+                              </h3>
+                              {event.type === "source" && sourceDisplay(event).host && (
+                                <span className="raTimelineSourceHost">
+                                  {sourceDisplay(event).host}
+                                </span>
+                              )}
                             </div>
 
                             <time>{new Date(event.at).toLocaleString()}</time>
@@ -1296,14 +1305,21 @@ export default function ResearchAgentPage() {
                           ) : null}
 
                           {event.url && (
-                            <a
-                              className="raTimelineLink"
-                              href={event.url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open source ↗
-                            </a>
+                            <div className="raTimelineSourceLinkRow">
+                              <a
+                                className="raTimelineLink"
+                                href={event.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open source ↗
+                              </a>
+                              {event.type === "source" && (
+                                <span className="raTimelineUrl" title={event.url}>
+                                  {event.url}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </article>
@@ -2056,7 +2072,43 @@ export default function ResearchAgentPage() {
           align-items:flex-start;
         }
 
-        .raTimelineHead h3{margin:3px 0 0;font-size:15px}
+        .raTimelineHead h3{
+          margin:3px 0 0;
+          max-width:760px;
+          font-size:15px;
+          line-height:1.4;
+          overflow-wrap:anywhere;
+          word-break:break-word;
+        }
+
+        .raTimelineSourceHost{
+          display:inline-block;
+          margin-top:5px;
+          color:#6f7379;
+          font-size:9px;
+          text-transform:uppercase;
+          letter-spacing:.08em;
+        }
+
+        .raTimelineSourceLinkRow{
+          display:flex;
+          align-items:center;
+          gap:10px;
+          min-width:0;
+          margin-top:10px;
+        }
+
+        .raTimelineUrl{
+          display:block;
+          min-width:0;
+          max-width:620px;
+          color:#5f6369;
+          font-size:9px;
+          white-space:nowrap;
+          overflow:hidden;
+          text-overflow:ellipsis;
+        }
+
         .raEventType{
           color:#777a80;
           font-size:9px;
@@ -2409,6 +2461,12 @@ export default function ResearchAgentPage() {
           .raStartContent{padding:26px}
           .raSection,.raDocumentShell{padding:20px}
           .raTimelineHead{flex-direction:column;gap:5px}
+          .raTimelineSourceLinkRow{align-items:flex-start;flex-direction:column}
+          .raTimelineUrl{
+            max-width:100%;
+            white-space:normal;
+            overflow-wrap:anywhere;
+          }
           .raHero h1{font-size:42px}
         }
       `}</style>
