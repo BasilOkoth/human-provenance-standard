@@ -32,6 +32,7 @@ export default function Nav() {
 
       <div className="navLinks">
         <Link href="/create">Create</Link>
+        <Link href="/research-agent">Research Agent</Link>
         <Link href="/verify">Verify</Link>
         <Link href="/records">Registry</Link>
         <Link href="/institutional">Institutional</Link>
@@ -61,6 +62,7 @@ export default function Nav() {
       <div id="mobile-navigation" className={`mobileMenu ${open ? "mobileMenuOpen" : ""}`}>
         <div className="mobileMenuInner">
           <Link href="/create" onClick={closeMenu}>Create</Link>
+          <Link href="/research-agent" onClick={closeMenu}>Research Agent</Link>
           <Link href="/verify" onClick={closeMenu}>Verify</Link>
           <Link href="/records" onClick={closeMenu}>Registry</Link>
           <Link href="/institutional" onClick={closeMenu}>Institutional</Link>
