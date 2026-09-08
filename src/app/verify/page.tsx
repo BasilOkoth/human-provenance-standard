@@ -40,8 +40,8 @@ function isLikelyListMarker(value: string) {
 }
 
 function classifyPublicTextAnalysis(diff: HpsTextDiffResult): PublicTextAnalysis {
-  const materialValueChanges = diff.changes.filter(change => change.material);
-
+  // Presentation/extraction noise must be identified first. A list marker such
+  // as "1." contains a number, but it is not a material numerical change.
   const presentationChanges = diff.changes.filter(change => {
     if (change.category === "formatting" || change.category === "punctuation") {
       return true;
@@ -54,6 +54,11 @@ function classifyPublicTextAnalysis(diff: HpsTextDiffResult): PublicTextAnalysis
   });
 
   const presentationSet = new Set(presentationChanges);
+
+  const materialValueChanges = diff.changes.filter(
+    change => change.material && !presentationSet.has(change)
+  );
+
   const materialSet = new Set(materialValueChanges);
 
   const textChanges = diff.changes.filter(change => {
@@ -70,6 +75,17 @@ function classifyPublicTextAnalysis(diff: HpsTextDiffResult): PublicTextAnalysis
     materialValueChanges,
     presentationChanges,
   };
+}
+
+function displayChangeCategory(change: HpsTextChange) {
+  if (change.category !== "mixed") return change.category.toUpperCase();
+
+  const text = `${change.originalText} ${change.candidateText}`.trim();
+  const wordCount = (text.match(/\p{L}+(?:['-]\p{L}+)*/gu) || []).length;
+
+  if (wordCount >= 2) return "PHRASE";
+  if (wordCount === 1) return "WORD";
+  return "TEXT";
 }
 
 function VerifyContent() {
@@ -366,7 +382,11 @@ function VerifyContent() {
                     <p className="micro">
                       REGISTERED PUBLIC TEXT INTEGRITY WITNESS
                     </p>
-                    <h2>⚠ Textual content changes detected</h2>
+                    <h2>
+                      ⚠ {meaningfulTextChangeCount === 1
+                        ? "Textual content change detected"
+                        : "Textual content changes detected"}
+                    </h2>
                     <p>
                       HPS compared this candidate locally with the signed
                       registered public-text witness. The verifier did not need
@@ -398,6 +418,13 @@ function VerifyContent() {
                       </div>
                     </div>
 
+                    {publicTextAnalysis.materialValueChanges.length === 0 && (
+                      <p className="muted" style={{ marginTop: 12 }}>
+                        No critical numerical, date, percentage or currency
+                        changes were detected.
+                      </p>
+                    )}
+
                     <div className="statusBox" style={{ marginTop: 14 }}>
                       {[
                         ...publicTextAnalysis.materialValueChanges,
@@ -424,7 +451,7 @@ function VerifyContent() {
                               <strong>
                                 {change.material ? "⚠ " : ""}
                                 {change.kind.toUpperCase()} ·{" "}
-                                {change.category.toUpperCase()}
+                                {displayChangeCategory(change)}
                               </strong>
                             </p>
 
@@ -464,10 +491,35 @@ function VerifyContent() {
                         ))}
                     </div>
 
+                    {publicTextAnalysis.presentationChanges.length > 0 && (
+                      <details className="advancedVerify" style={{ marginTop: 14 }}>
+                        <summary>
+                          Show {publicTextAnalysis.presentationChanges.length} presentation /
+                          extraction difference
+                          {publicTextAnalysis.presentationChanges.length === 1 ? "" : "s"}
+                        </summary>
+                        <div className="statusBox" style={{ marginTop: 10 }}>
+                          {publicTextAnalysis.presentationChanges
+                            .slice(0, 30)
+                            .map((change, i) => (
+                              <p key={i}>
+                                <strong>{change.kind.toUpperCase()}</strong>
+                                {" · "}
+                                <code>
+                                  {change.originalText ||
+                                    change.candidateText ||
+                                    "(formatting)"}
+                                </code>
+                              </p>
+                            ))}
+                        </div>
+                      </details>
+                    )}
+
                     <p className="muted">
-                      Presentation-only extraction differences are separated
-                      from the main textual-change list. OCR-derived comparisons
-                      may still contain OCR errors.
+                      Presentation-only extraction differences are excluded from
+                      material-change counts and collapsed by default. OCR-derived
+                      comparisons may still contain OCR errors.
                     </p>
                   </div>
                 )}
