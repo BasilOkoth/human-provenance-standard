@@ -560,6 +560,15 @@ function VerifyContent() {
                       </p>
                       <h2>⚠ Material value change detected</h2>
 
+                      {witnessResult.labelFallbackMatches > 0 && (
+                        <p className="muted" style={{ marginTop: 10 }}>
+                          HPS recovered {witnessResult.labelFallbackMatches} value
+                          match{witnessResult.labelFallbackMatches === 1 ? "" : "es"}
+                          using the same registered field label after
+                          cross-format extraction changed the surrounding anchor.
+                        </p>
+                      )}
+
                       <div className="statusBox" style={{ marginTop: 12 }}>
                         {witnessResult.changes.map(
                           (change: any, i: number) => (
@@ -590,12 +599,53 @@ function VerifyContent() {
                         REGISTERED CONTENT INTEGRITY WITNESS
                       </p>
                       <h3>
-                        ✓ No changed registered critical values found
+                        ✓ Registered critical values accounted for
                       </h3>
                       <p>
-                        HPS matched {witnessResult.matchedEntries} registered
-                        critical-value anchors with no changed value among those
-                        matches.
+                        HPS accounted for all {witnessResult.registeredEntries}
+                        registered critical-value entries and found no changed
+                        value.
+                      </p>
+                    </div>
+                  )}
+
+                {!publicTextAnalysis &&
+                  witnessResult?.status === "inconclusive" && (
+                    <div className="notice" style={{ marginTop: 18 }}>
+                      <p className="micro">
+                        REGISTERED CONTENT INTEGRITY WITNESS
+                      </p>
+                      <h3>⚠ Critical-value comparison inconclusive</h3>
+                      <p>
+                        HPS matched {witnessResult.matchedEntries} of{" "}
+                        {witnessResult.registeredEntries} registered
+                        critical-value entries, but could not account for all of
+                        them. HPS therefore will not say that the critical values
+                        are unchanged.
+                      </p>
+
+                      {(witnessResult.missingRegisteredCount > 0 ||
+                        witnessResult.extraCandidateCount > 0) && (
+                        <div className="statusBox" style={{ marginTop: 12 }}>
+                          {witnessResult.missingRegisteredCount > 0 && (
+                            <p>
+                              <strong>Registered values not matched:</strong>{" "}
+                              {witnessResult.missingRegisteredCount}
+                            </p>
+                          )}
+                          {witnessResult.extraCandidateCount > 0 && (
+                            <p>
+                              <strong>Candidate values not explained:</strong>{" "}
+                              {witnessResult.extraCandidateCount}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="muted">
+                        This can happen when a conversion changes table order,
+                        surrounding labels or extraction structure. It is a
+                        reason for caution, not proof of tampering.
                       </p>
                     </div>
                   )}
