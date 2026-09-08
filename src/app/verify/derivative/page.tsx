@@ -4,6 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { fingerprintFile, type HpsAssetFingerprintV1 } from "@/lib/hps/fingerprint-client";
+import {
+  extractLocalDocumentText,
+  type HpsLocalTextExtraction,
+} from "@/lib/hps/local-text-extract";
+import {
+  diffDocumentText,
+  type HpsTextDiffResult,
+} from "@/lib/hps/text-diff";
 
 const labels: Record<string, { title: string; tone: string }> = {
   exact_original: { title: "EXACT ORIGINAL", tone: "positive" },
@@ -27,8 +35,21 @@ const transformationLabels: Record<string, string> = {
   other: "Other",
 };
 
+type LocalChangeAnalysis = {
+  diff: HpsTextDiffResult;
+  original: HpsLocalTextExtraction;
+  candidate: HpsLocalTextExtraction;
+};
+
+function changeTitle(kind: string) {
+  if (kind === "replaced") return "REPLACED";
+  if (kind === "deleted") return "DELETED";
+  return "INSERTED";
+}
+
 export default function ResilientVerifyPage() {
   const [busy, setBusy] = useState(false);
+  const [candidateFile, setCandidateFile] = useState<File | null>(null);
   const [fingerprint, setFingerprint] = useState<HpsAssetFingerprintV1 | null>(null);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
@@ -37,13 +58,21 @@ export default function ResilientVerifyPage() {
   const [registering, setRegistering] = useState(false);
   const [registerMessage, setRegisterMessage] = useState("");
 
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [changeError, setChangeError] = useState("");
+  const [changeAnalysis, setChangeAnalysis] = useState<LocalChangeAnalysis | null>(null);
+
   async function verify(file?: File) {
     if (!file) return;
+    setCandidateFile(file);
     setBusy(true);
     setError("");
     setResult(null);
     setFingerprint(null);
     setRegisterMessage("");
+    setChangeAnalysis(null);
+    setChangeError("");
 
     try {
       const fp = await fingerprintFile(file);
@@ -66,6 +95,40 @@ export default function ResilientVerifyPage() {
       setError(e.message || "Unable to verify file.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function analyzeExactChanges() {
+    if (!candidateFile || !referenceFile) {
+      setChangeError("Upload the candidate above and select the known original/reference file first.");
+      return;
+    }
+
+    setChangeBusy(true);
+    setChangeError("");
+    setChangeAnalysis(null);
+
+    try {
+      // Deliberately sequential: image-only PDFs can start a local OCR worker.
+      const original = await extractLocalDocumentText(referenceFile);
+      const candidate = await extractLocalDocumentText(candidateFile);
+
+      if (!original.text.trim()) {
+        throw new Error("HPS could not recover comparable text from the original/reference file.");
+      }
+      if (!candidate.text.trim()) {
+        throw new Error("HPS could not recover comparable text from the candidate file.");
+      }
+
+      setChangeAnalysis({
+        original,
+        candidate,
+        diff: diffDocumentText(original.text, candidate.text),
+      });
+    } catch (e: any) {
+      setChangeError(e.message || "Unable to compare document text locally.");
+    } finally {
+      setChangeBusy(false);
     }
   }
 
@@ -104,11 +167,13 @@ export default function ResilientVerifyPage() {
 
       <header className="pageHead shell">
         <p className="eyebrow">HPS VERIFY · RESILIENT DOCUMENT PROVENANCE</p>
-        <h1>Verify originals, scans and cross-format copies.</h1>
+        <h1>Verify provenance — then inspect exactly what changed.</h1>
         <p>
           HPS checks exact SHA-256 first. If the bytes differ, it can use embedded text,
           browser OCR, canonical content, document structure and supporting visual signals
-          to detect likely transformations without calling them identical files.
+          to detect likely transformations without calling them identical files. When you
+          also have a known original, HPS can compare both files locally and show exact
+          insertions, deletions and replacements.
         </p>
       </header>
 
@@ -156,7 +221,12 @@ export default function ResilientVerifyPage() {
 
                 <div className="verificationGrid">
                   <div><span>Exact SHA-256</span><strong>{best.comparison?.exactHashMatch ? "✓ Exact" : "Different bytes"}</strong></div>
-                  <div><span>Strict canonical text</span><strong>{best.comparison?.canonicalTextMatch === true ? "✓ Identical" : best.comparison?.canonicalTextMatch === false ? "Different" : "Unavailable"}</strong></div>
+                  <div>
+                    <span>Text integrity</span>
+                    <strong className={best.comparison?.canonicalTextMatch === false ? "negative" : best.comparison?.canonicalTextMatch === true ? "positive" : ""}>
+                      {best.comparison?.canonicalTextMatch === true ? "✓ Identical" : best.comparison?.canonicalTextMatch === false ? "⚠ Changed" : "Unavailable"}
+                    </strong>
+                  </div>
                   <div><span>Cross-format content</span><strong>{best.comparison?.contentCanonicalMatch === true ? "✓ Canonical match" : typeof best.comparison?.contentSimilarity === "number" ? `${(best.comparison.contentSimilarity * 100).toFixed(1)}% similar` : "Unavailable"}</strong></div>
                   <div><span>Document structure</span><strong>{typeof best.comparison?.structureSimilarity === "number" ? `${(best.comparison.structureSimilarity * 100).toFixed(1)}%` : "Unavailable"}</strong></div>
                   <div><span>Visual similarity</span><strong>{typeof best.comparison?.visualSimilarity === "number" ? `${(best.comparison.visualSimilarity * 100).toFixed(1)}%` : "Unavailable"}</strong></div>
@@ -174,6 +244,106 @@ export default function ResilientVerifyPage() {
                     {best.comparison.reasons.map((reason: string, i: number) => <p key={i}>{reason}</p>)}
                   </div>
                 )}
+
+                <div className="accountCard" style={{ marginTop: 20 }}>
+                  <p className="micro">EXACT LOCAL CHANGE ANALYSIS</p>
+                  <h3>See the words, numbers or dates that changed.</h3>
+                  <p className="muted">
+                    Registry fingerprints can prove that content differs, but a cryptographic hash does not contain the deleted word or the old number. If you have the known original/reference file, HPS can compare it with the candidate entirely in this browser and show the exact recovered-text edits.
+                  </p>
+
+                  <div className="field" style={{ marginTop: 14 }}>
+                    <label>Known original / reference file</label>
+                    <input
+                      type="file"
+                      onChange={e => {
+                        setReferenceFile(e.target.files?.[0] || null);
+                        setChangeAnalysis(null);
+                        setChangeError("");
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    className="button primary"
+                    style={{ marginTop: 12 }}
+                    disabled={!candidateFile || !referenceFile || changeBusy}
+                    onClick={analyzeExactChanges}
+                  >
+                    {changeBusy ? "Comparing locally…" : "Analyze exact text changes locally"}
+                  </button>
+
+                  {changeError && <div className="errorBox" style={{ marginTop: 14 }}>{changeError}</div>}
+
+                  {changeAnalysis && (
+                    <div style={{ marginTop: 18 }}>
+                      <div className="verificationGrid">
+                        <div><span>Text result</span><strong className={changeAnalysis.diff.exactTextMatch ? "positive" : "negative"}>{changeAnalysis.diff.exactTextMatch ? "✓ No recovered-text changes" : "⚠ Changes detected"}</strong></div>
+                        <div><span>Replacements</span><strong>{changeAnalysis.diff.replacementGroups}</strong></div>
+                        <div><span>Deletions</span><strong>{changeAnalysis.diff.deletionGroups}</strong></div>
+                        <div><span>Insertions</span><strong>{changeAnalysis.diff.insertionGroups}</strong></div>
+                        <div><span>Critical-value changes</span><strong className={changeAnalysis.diff.materialChangeGroups ? "negative" : ""}>{changeAnalysis.diff.materialChangeGroups}</strong></div>
+                        <div><span>Text extraction</span><strong>{changeAnalysis.original.textSource} → {changeAnalysis.candidate.textSource}</strong></div>
+                      </div>
+
+                      {changeAnalysis.diff.exactTextMatch ? (
+                        <div className="successPanel" style={{ marginTop: 16 }}>
+                          <h3>✓ Recovered text is equivalent after HPS normalization.</h3>
+                          <p>No token-level insertion, deletion or replacement was found in the locally recovered text.</p>
+                        </div>
+                      ) : (
+                        <div className="statusBox" style={{ marginTop: 16 }}>
+                          {changeAnalysis.diff.changes.map((change, i) => (
+                            <div key={i} style={{ padding: "12px 0", borderBottom: i === changeAnalysis.diff.changes.length - 1 ? "none" : "1px solid rgba(255,255,255,.08)" }}>
+                              <p style={{ margin: "0 0 7px" }}>
+                                <strong>{change.material ? "⚠ " : ""}{changeTitle(change.kind)} · {change.category.toUpperCase()}</strong>
+                              </p>
+
+                              {change.kind === "replaced" && (
+                                <p style={{ margin: "0 0 7px" }}><code>{change.originalText || "∅"}</code> → <code>{change.candidateText || "∅"}</code></p>
+                              )}
+                              {change.kind === "deleted" && (
+                                <p style={{ margin: "0 0 7px" }}>Deleted: <code>{change.originalText}</code></p>
+                              )}
+                              {change.kind === "inserted" && (
+                                <p style={{ margin: "0 0 7px" }}>Inserted: <code>{change.candidateText}</code></p>
+                              )}
+
+                              {(change.contextBefore || change.contextAfter) && (
+                                <p className="muted" style={{ margin: 0 }}>
+                                  Context: …{change.contextBefore}{change.contextBefore ? " " : ""}<strong>[change]</strong>{change.contextAfter ? " " : ""}{change.contextAfter}…
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {changeAnalysis.diff.truncated && (
+                        <div className="notice" style={{ marginTop: 14 }}>
+                          <strong>Large change region.</strong>
+                          <p>The detailed change list was bounded for browser performance. The summary still indicates that substantial content changed.</p>
+                        </div>
+                      )}
+
+                      {[...changeAnalysis.original.warnings, ...changeAnalysis.candidate.warnings].length > 0 && (
+                        <details className="advancedVerify" style={{ marginTop: 14 }}>
+                          <summary>Local extraction notes</summary>
+                          <div className="statusBox">
+                            {[...changeAnalysis.original.warnings, ...changeAnalysis.candidate.warnings].map((warning, i) => <p key={i}>{warning}</p>)}
+                          </div>
+                        </details>
+                      )}
+
+                      <div className="notice" style={{ marginTop: 14 }}>
+                        <strong>Local diff is content analysis, not provenance proof.</strong>
+                        <p>
+                          The two file texts are compared in your browser and are not posted to the HPS verification API. The signed HPS record and cryptographic signatures establish provenance; this local comparison explains what changed between the files you selected. OCR-derived differences can include OCR errors.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <div className="notice" style={{ marginTop: 18 }}>
                   <strong>Signature and stamp signals are supporting evidence only.</strong>
