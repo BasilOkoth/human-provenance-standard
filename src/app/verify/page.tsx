@@ -560,6 +560,27 @@ function VerifyContent() {
                       </p>
                       <h2>⚠ Material value change detected</h2>
 
+                      {witnessResult.inferredSubstitutionMatches > 0 && (
+                        <div className="notice" style={{ marginTop: 12 }}>
+                          <strong>
+                            High-confidence substitution pairing
+                          </strong>
+                          <p>
+                            HPS paired{" "}
+                            {witnessResult.inferredSubstitutionMatches} unmatched
+                            registered value
+                            {witnessResult.inferredSubstitutionMatches === 1
+                              ? ""
+                              : "s"}{" "}
+                            with the corresponding candidate value after nearly
+                            all other registered critical values matched. The
+                            pairing uses value type, document position, available
+                            field-label similarity and the one-to-one unmatched
+                            pattern.
+                          </p>
+                        </div>
+                      )}
+
                       {witnessResult.labelFallbackMatches > 0 && (
                         <p className="muted" style={{ marginTop: 10 }}>
                           HPS recovered {witnessResult.labelFallbackMatches} value
@@ -584,6 +605,20 @@ function VerifyContent() {
                                 {" → "}
                                 <code>{change.candidateValue}</code>
                               </p>
+
+                              {change.matchBasis ===
+                                "inferred_substitution" && (
+                                <p
+                                  className="muted"
+                                  style={{ margin: "5px 0 0" }}
+                                >
+                                  Paired as a high-confidence substitution
+                                  {typeof change.pairConfidence === "number"
+                                    ? ` · ${change.pairConfidence}/100 pairing confidence`
+                                    : ""}
+                                  .
+                                </p>
+                              )}
                             </div>
                           )
                         )}
