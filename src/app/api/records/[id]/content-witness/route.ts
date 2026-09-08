@@ -17,7 +17,10 @@ async function mayRegister(
   record: any,
   admin: ReturnType<typeof createAdminSupabase>
 ) {
-  if (record.owner_user_id === userId && record.record_kind !== "institutional_document") {
+  if (
+    record.owner_user_id === userId &&
+    record.record_kind !== "institutional_document"
+  ) {
     return true;
   }
 
@@ -32,8 +35,8 @@ async function mayRegister(
 
   return Boolean(
     membership &&
-    membership.status === "active" &&
-    ["admin", "issuer"].includes(membership.role)
+      membership.status === "active" &&
+      ["admin", "issuer"].includes(membership.role)
   );
 }
 
@@ -61,24 +64,41 @@ export async function GET(
 
     const validRegistrySignature = Boolean(
       data.registry_payload &&
-      data.registry_signature &&
-      data.registry_public_key &&
-      verifyDetachedCanonical(
-        data.registry_payload,
-        data.registry_signature,
-        data.registry_public_key
-      )
+        data.registry_signature &&
+        data.registry_public_key &&
+        verifyDetachedCanonical(
+          data.registry_payload,
+          data.registry_signature,
+          data.registry_public_key
+        )
     );
+
+    const parsedWitness = ContentIntegrityWitnessSchema.safeParse(data.witness);
+    const publicText =
+      validRegistrySignature &&
+      parsedWitness.success &&
+      parsedWitness.data.mode === "public_text"
+        ? parsedWitness.data.publicText || null
+        : null;
 
     return NextResponse.json({
       enabled: true,
       recordId: id,
       mode: data.mode,
-      entryCount: Array.isArray(data.witness?.entries)
-        ? data.witness.entries.length
-        : 0,
-      truncated: Boolean(data.witness?.truncated),
+      entryCount:
+        parsedWitness.success && Array.isArray(parsedWitness.data.entries)
+          ? parsedWitness.data.entries.length
+          : 0,
+      truncated: parsedWitness.success
+        ? Boolean(parsedWitness.data.truncated)
+        : false,
       validRegistrySignature,
+      publicTextAvailable: Boolean(publicText),
+      publicText,
+      publicTextTokenCount:
+        parsedWitness.success
+          ? parsedWitness.data.publicTextTokenCount ?? null
+          : null,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     });
@@ -111,6 +131,7 @@ export async function POST(
     }
 
     const parsed = BodySchema.safeParse(await request.json());
+
     if (!parsed.success) {
       return NextResponse.json(
         {
@@ -140,7 +161,10 @@ export async function POST(
 
     if (record.status === "revoked") {
       return NextResponse.json(
-        { error: "A revoked record cannot register a content integrity witness." },
+        {
+          error:
+            "A revoked record cannot register a content integrity witness.",
+        },
         { status: 409 }
       );
     }
@@ -155,7 +179,10 @@ export async function POST(
       );
     }
 
-    if (record.asset_hash.toLowerCase() !== parsed.data.assetHash.toLowerCase()) {
+    if (
+      record.asset_hash.toLowerCase() !==
+      parsed.data.assetHash.toLowerCase()
+    ) {
       return NextResponse.json(
         {
           error:
@@ -176,8 +203,9 @@ export async function POST(
     }
 
     const now = new Date().toISOString();
+
     const registryPayload = {
-      hpsVersion: "1.4",
+      hpsVersion: "1.5",
       type: "content_integrity_witness",
       recordId: id,
       assetHash: parsed.data.assetHash.toLowerCase(),
@@ -185,6 +213,8 @@ export async function POST(
       witnessMode: parsed.data.witness.mode,
       sourceTextSha256: parsed.data.witness.sourceTextSha256,
       entryCount: parsed.data.witness.entries.length,
+      publicTextTokenCount:
+        parsed.data.witness.publicTextTokenCount ?? null,
       registeredBy: user.id,
       registeredAt: now,
     };
@@ -221,6 +251,11 @@ export async function POST(
         recordId: data.record_id,
         mode: data.mode,
         entryCount: data.witness?.entries?.length || 0,
+        publicTextAvailable:
+          data.mode === "public_text" &&
+          Boolean(data.witness?.publicText),
+        publicTextTokenCount:
+          data.witness?.publicTextTokenCount ?? null,
         createdAt: data.created_at,
         updatedAt: data.updated_at,
         registrySignature,

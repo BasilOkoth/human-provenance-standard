@@ -1,9 +1,15 @@
 "use client";
+
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import { fingerprintFile } from "@/lib/hps/fingerprint-client";
 import { buildContentIntegrityWitness } from "@/lib/hps/content-witness-client";
+import {
+  diffDocumentText,
+  type HpsTextChange,
+  type HpsTextDiffResult,
+} from "@/lib/hps/text-diff";
 
 const shortCode = (id?: string) => id?.split("-").pop() || "";
 
@@ -14,12 +20,63 @@ const classLabel: Record<string, string> = {
   cross_format_match: "CROSS-FORMAT MATCH",
   derivative_candidate: "POSSIBLE DERIVATIVE",
   modified_derivative: "RELATED / MODIFIED",
-  revoked: "REVOKED"
+  revoked: "REVOKED",
 };
+
+type PublicTextAnalysis = {
+  diff: HpsTextDiffResult;
+  textChanges: HpsTextChange[];
+  materialValueChanges: HpsTextChange[];
+  presentationChanges: HpsTextChange[];
+};
+
+function containsLetters(value: string) {
+  return /\p{L}/u.test(value);
+}
+
+function isLikelyListMarker(value: string) {
+  const compact = value.replace(/\s+/g, "");
+  return /^(?:\(?\d{1,3}\)?[.)]?|[ivxlcdm]{1,6}[.)])$/i.test(compact);
+}
+
+function classifyPublicTextAnalysis(diff: HpsTextDiffResult): PublicTextAnalysis {
+  const materialValueChanges = diff.changes.filter(change => change.material);
+
+  const presentationChanges = diff.changes.filter(change => {
+    if (change.category === "formatting" || change.category === "punctuation") {
+      return true;
+    }
+
+    const only = change.originalText || change.candidateText;
+    if (isLikelyListMarker(only)) return true;
+
+    return false;
+  });
+
+  const presentationSet = new Set(presentationChanges);
+  const materialSet = new Set(materialValueChanges);
+
+  const textChanges = diff.changes.filter(change => {
+    if (presentationSet.has(change) || materialSet.has(change)) return false;
+    return (
+      containsLetters(change.originalText) ||
+      containsLetters(change.candidateText)
+    );
+  });
+
+  return {
+    diff,
+    textChanges,
+    materialValueChanges,
+    presentationChanges,
+  };
+}
 
 function VerifyContent() {
   const [fileResult, setFileResult] = useState<any>(null);
   const [witnessResult, setWitnessResult] = useState<any>(null);
+  const [publicTextAnalysis, setPublicTextAnalysis] =
+    useState<PublicTextAnalysis | null>(null);
   const [busy, setBusy] = useState(false);
   const [manifestText, setManifestText] = useState("");
   const [manifestResult, setManifestResult] = useState<any>(null);
@@ -27,29 +84,35 @@ function VerifyContent() {
 
   async function verifyFile(file?: File) {
     if (!file) return;
+
     setBusy(true);
     setError("");
     setFileResult(null);
     setWitnessResult(null);
+    setPublicTextAnalysis(null);
 
     try {
       const fingerprint = await fingerprintFile(file);
+
       const r = await fetch("/api/verify/asset", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           assetHash: fingerprint.exactSha256,
-          fingerprint
-        })
+          fingerprint,
+        }),
       });
 
       const data = await r.json();
-      if (!r.ok) throw new Error(data.error || "Unable to verify file.");
+
+      if (!r.ok) {
+        throw new Error(data.error || "Unable to verify file.");
+      }
 
       setFileResult({
         ...data,
         fileName: file.name,
-        fingerprint
+        fingerprint,
       });
 
       const best = data?.records?.[0];
@@ -60,25 +123,52 @@ function VerifyContent() {
         best.status !== "revoked"
       ) {
         try {
-          const candidate = await buildContentIntegrityWitness(file);
-
-          const witnessResponse = await fetch("/api/verify/content-witness", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              recordId: best.id,
-              candidateWitness: candidate.witness
-            })
+          // Candidate text is extracted locally once. public_values mode sends
+          // only selected critical-value witness data to HPS. public_text mode
+          // compares the candidate locally against the registered public text.
+          const candidate = await buildContentIntegrityWitness(file, {
+            mode: "public_values",
           });
 
+          const [witnessResponse, witnessMetaResponse] = await Promise.all([
+            fetch("/api/verify/content-witness", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                recordId: best.id,
+                candidateWitness: candidate.witness,
+              }),
+            }),
+            fetch(
+              `/api/records/${encodeURIComponent(best.id)}/content-witness`,
+              { cache: "no-store" }
+            ),
+          ]);
+
           const witnessData = await witnessResponse.json();
+          const witnessMeta = await witnessMetaResponse.json();
 
           if (witnessResponse.ok && witnessData.available) {
             setWitnessResult(witnessData);
           }
+
+          if (
+            witnessMetaResponse.ok &&
+            witnessMeta.enabled &&
+            witnessMeta.validRegistrySignature &&
+            witnessMeta.mode === "public_text" &&
+            typeof witnessMeta.publicText === "string" &&
+            witnessMeta.publicText.trim()
+          ) {
+            const diff = diffDocumentText(
+              witnessMeta.publicText,
+              candidate.extractedText
+            );
+            setPublicTextAnalysis(classifyPublicTextAnalysis(diff));
+          }
         } catch {
-          // The resilient provenance result remains valid even if this optional
-          // explanatory layer cannot extract suitable text.
+          // Optional explanatory integrity layers must never invalidate the
+          // underlying provenance verification result.
         }
       }
     } catch (e: any) {
@@ -93,13 +183,13 @@ function VerifyContent() {
       const r = await fetch("/api/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: manifestText
+        body: manifestText,
       });
       setManifestResult(await r.json());
     } catch {
       setManifestResult({
         validSchema: false,
-        error: "Invalid manifest."
+        error: "Invalid manifest.",
       });
     }
   }
@@ -108,13 +198,17 @@ function VerifyContent() {
 
   const bestTrusted = Boolean(
     best &&
-    best.status === "active" &&
-    best.validRegistrySignature &&
-    (best.creatorSignatureValid || best.institutionSignatureValid)
+      best.status === "active" &&
+      best.validRegistrySignature &&
+      (best.creatorSignatureValid || best.institutionSignatureValid)
   );
 
   const verificationClass = best?.verificationClass || "";
   const exact = verificationClass === "exact_original";
+
+  const meaningfulTextChangeCount =
+    (publicTextAnalysis?.textChanges.length || 0) +
+    (publicTextAnalysis?.materialValueChanges.length || 0);
 
   return (
     <main className="pageShell">
@@ -124,32 +218,34 @@ function VerifyContent() {
         <p className="eyebrow">HPS VERIFY</p>
         <h1>Check the file in front of you.</h1>
         <p>
-          HPS checks exact SHA-256 first. For scans and reformatted documents
-          it can also use browser OCR, canonical content, document structure
-          and supporting visual fingerprints to identify likely provenance
-          relationships. Where the issuer or creator has enabled a Content
-          Integrity Witness, HPS can also identify changed registered critical
-          values from this one uploaded candidate.
+          Upload only the document you received. HPS first checks cryptographic
+          identity and resilient provenance. If the registered owner or issuer
+          enabled a Content Integrity Witness, HPS can also explain registered
+          value changes and, in public-text mode, word-level insertions,
+          deletions and replacements without asking the verifier for the
+          original file.
         </p>
       </header>
 
       <section className="verifyBox">
         <div className="fileDrop">
-          <p className="micro">LOCAL DOCUMENT FINGERPRINTING</p>
-          <h2>Upload the file.</h2>
+          <p className="micro">ONE-FILE VERIFICATION</p>
+          <h2>Upload the document you want to check.</h2>
           <input type="file" onChange={e => verifyFile(e.target.files?.[0])} />
+
           {busy && (
             <p className="muted">
               Checking exact identity, resilient provenance and available
-              content-integrity witnesses… Scanned documents may take longer.
+              integrity witnesses…
             </p>
           )}
+
           <p className="muted">
-            Your file bytes stay in the browser. HPS receives fingerprints.
-            When a registered Content Integrity Witness is available, selected
-            extracted critical values such as amounts, dates, percentages and
-            numbers may also be compared with the registered witness; the full
-            document text is not posted by this feature.
+            Candidate file bytes and complete candidate text stay in your
+            browser. HPS receives the regular file fingerprint and, where
+            available, selected critical-value witness data. If the registered
+            owner explicitly enabled public-text integrity, the signed
+            registered text is returned to your browser and compared locally.
           </p>
         </div>
 
@@ -225,14 +321,10 @@ function VerifyContent() {
                     <span>Registry signature</span>
                     <strong
                       className={
-                        best.validRegistrySignature
-                          ? "positive"
-                          : "negative"
+                        best.validRegistrySignature ? "positive" : "negative"
                       }
                     >
-                      {best.validRegistrySignature
-                        ? "✓ Valid"
-                        : "✕ Invalid"}
+                      {best.validRegistrySignature ? "✓ Valid" : "✕ Invalid"}
                     </strong>
                   </div>
 
@@ -269,101 +361,192 @@ function VerifyContent() {
                   </div>
                 )}
 
-                {witnessResult?.status ===
-                  "material_change_detected" && (
-                  <div
-                    className="errorBox"
-                    style={{ marginTop: 18 }}
-                  >
+                {publicTextAnalysis && meaningfulTextChangeCount > 0 && (
+                  <div className="errorBox" style={{ marginTop: 18 }}>
                     <p className="micro">
-                      REGISTERED CONTENT INTEGRITY WITNESS
+                      REGISTERED PUBLIC TEXT INTEGRITY WITNESS
                     </p>
-                    <h2>⚠ Material value change detected</h2>
+                    <h2>⚠ Textual content changes detected</h2>
                     <p>
-                      HPS matched this candidate to signed critical-value
-                      anchors registered from the exact original and found{" "}
-                      <strong>
-                        {witnessResult.materialChangeCount}
-                      </strong>{" "}
-                      changed value
-                      {witnessResult.materialChangeCount === 1 ? "" : "s"}.
+                      HPS compared this candidate locally with the signed
+                      registered public-text witness. The verifier did not need
+                      to upload the original file.
                     </p>
 
-                    <div
-                      className="statusBox"
-                      style={{ marginTop: 12 }}
-                    >
-                      {witnessResult.changes.map(
-                        (change: any, i: number) => (
+                    <div className="verificationGrid" style={{ marginTop: 14 }}>
+                      <div>
+                        <span>Word/text changes</span>
+                        <strong>
+                          {publicTextAnalysis.textChanges.length}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Material value changes</span>
+                        <strong className={
+                          publicTextAnalysis.materialValueChanges.length
+                            ? "negative"
+                            : ""
+                        }>
+                          {publicTextAnalysis.materialValueChanges.length}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Presentation differences</span>
+                        <strong>
+                          {publicTextAnalysis.presentationChanges.length}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="statusBox" style={{ marginTop: 14 }}>
+                      {[
+                        ...publicTextAnalysis.materialValueChanges,
+                        ...publicTextAnalysis.textChanges,
+                      ]
+                        .slice(0, 30)
+                        .map((change, i) => (
                           <div
                             key={i}
-                            style={{ padding: "8px 0" }}
+                            style={{
+                              padding: "9px 0",
+                              borderBottom:
+                                i ===
+                                Math.min(
+                                  30,
+                                  meaningfulTextChangeCount
+                                ) -
+                                  1
+                                  ? "none"
+                                  : "1px solid rgba(255,255,255,.08)",
+                            }}
                           >
                             <p style={{ margin: 0 }}>
                               <strong>
-                                {String(
-                                  change.category
-                                ).toUpperCase()}
+                                {change.material ? "⚠ " : ""}
+                                {change.kind.toUpperCase()} ·{" "}
+                                {change.category.toUpperCase()}
                               </strong>
-                              {change.label
-                                ? ` · ${change.label}`
-                                : ""}
                             </p>
-                            <p style={{ margin: "5px 0 0" }}>
-                              <code>{change.originalValue}</code>
-                              {" → "}
-                              <code>{change.candidateValue}</code>
-                            </p>
+
+                            {change.kind === "replaced" && (
+                              <p style={{ margin: "5px 0 0" }}>
+                                <code>{change.originalText || "∅"}</code>
+                                {" → "}
+                                <code>{change.candidateText || "∅"}</code>
+                              </p>
+                            )}
+
+                            {change.kind === "deleted" && (
+                              <p style={{ margin: "5px 0 0" }}>
+                                Deleted:{" "}
+                                <code>{change.originalText}</code>
+                              </p>
+                            )}
+
+                            {change.kind === "inserted" && (
+                              <p style={{ margin: "5px 0 0" }}>
+                                Inserted:{" "}
+                                <code>{change.candidateText}</code>
+                              </p>
+                            )}
+
+                            {(change.contextBefore ||
+                              change.contextAfter) && (
+                              <p className="muted" style={{ margin: "5px 0 0" }}>
+                                Context: …{change.contextBefore}
+                                {change.contextBefore ? " " : ""}
+                                <strong>[change]</strong>
+                                {change.contextAfter ? " " : ""}
+                                {change.contextAfter}…
+                              </p>
+                            )}
                           </div>
-                        )
-                      )}
+                        ))}
                     </div>
 
                     <p className="muted">
-                      Witness match coverage:{" "}
-                      {Math.round(
-                        (witnessResult.coverage || 0) * 100
-                      )}
-                      %. This explains a registered value difference; it
-                      does not by itself determine whether the candidate
-                      is fraudulent.
+                      Presentation-only extraction differences are separated
+                      from the main textual-change list. OCR-derived comparisons
+                      may still contain OCR errors.
                     </p>
                   </div>
                 )}
 
-                {witnessResult?.status ===
-                  "critical_values_consistent" && (
-                  <div
-                    className="successPanel"
-                    style={{ marginTop: 18 }}
-                  >
+                {publicTextAnalysis &&
+                  meaningfulTextChangeCount === 0 &&
+                  !publicTextAnalysis.diff.exactTextMatch && (
+                    <div className="notice" style={{ marginTop: 18 }}>
+                      <strong>
+                        Only presentation/extraction differences were found.
+                      </strong>
+                      <p>
+                        The public-text witness comparison found no meaningful
+                        word or registered value change after HPS filtering.
+                      </p>
+                    </div>
+                  )}
+
+                {publicTextAnalysis?.diff.exactTextMatch && (
+                  <div className="successPanel" style={{ marginTop: 18 }}>
                     <p className="micro">
-                      REGISTERED CONTENT INTEGRITY WITNESS
+                      REGISTERED PUBLIC TEXT INTEGRITY WITNESS
                     </p>
-                    <h3>
-                      ✓ No changed registered critical values found
-                    </h3>
+                    <h3>✓ Recovered text matches the registered witness</h3>
                     <p>
-                      HPS matched{" "}
-                      {witnessResult.matchedEntries} registered
-                      critical-value anchors with no value change among
-                      those matches.
+                      No token-level textual change was found after HPS
+                      normalization.
                     </p>
                   </div>
                 )}
 
-                {witnessResult?.status === "inconclusive" && (
-                  <div className="notice" style={{ marginTop: 18 }}>
-                    <strong>
-                      Content witness comparison was inconclusive.
-                    </strong>
-                    <p>
-                      A witness exists, but too few critical-value
-                      anchors matched this representation to make a
-                      reliable value-level comparison.
-                    </p>
-                  </div>
-                )}
+                {!publicTextAnalysis &&
+                  witnessResult?.status ===
+                    "material_change_detected" && (
+                    <div className="errorBox" style={{ marginTop: 18 }}>
+                      <p className="micro">
+                        REGISTERED CONTENT INTEGRITY WITNESS
+                      </p>
+                      <h2>⚠ Material value change detected</h2>
+
+                      <div className="statusBox" style={{ marginTop: 12 }}>
+                        {witnessResult.changes.map(
+                          (change: any, i: number) => (
+                            <div key={i} style={{ padding: "8px 0" }}>
+                              <p style={{ margin: 0 }}>
+                                <strong>
+                                  {String(change.category).toUpperCase()}
+                                </strong>
+                                {change.label ? ` · ${change.label}` : ""}
+                              </p>
+                              <p style={{ margin: "5px 0 0" }}>
+                                <code>{change.originalValue}</code>
+                                {" → "}
+                                <code>{change.candidateValue}</code>
+                              </p>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                {!publicTextAnalysis &&
+                  witnessResult?.status ===
+                    "critical_values_consistent" && (
+                    <div className="successPanel" style={{ marginTop: 18 }}>
+                      <p className="micro">
+                        REGISTERED CONTENT INTEGRITY WITNESS
+                      </p>
+                      <h3>
+                        ✓ No changed registered critical values found
+                      </h3>
+                      <p>
+                        HPS matched {witnessResult.matchedEntries} registered
+                        critical-value anchors with no changed value among those
+                        matches.
+                      </p>
+                    </div>
+                  )}
 
                 <div className="actions">
                   <Link
@@ -377,7 +560,7 @@ function VerifyContent() {
                     className="button darkButton"
                     href="/verify/derivative"
                   >
-                    Detailed scan / cross-format analysis
+                    Advanced two-file forensic comparison
                   </Link>
                 </div>
               </>
@@ -385,11 +568,10 @@ function VerifyContent() {
               <>
                 <h2>No HPS relationship found.</h2>
                 <p>
-                  HPS found no exact asset or sufficiently strong
-                  registered, textual, structural or visual
-                  relationship. This does not prove the file is false;
-                  it means HPS cannot connect it to a registered asset
-                  with the available evidence.
+                  HPS found no exact asset or sufficiently strong registered,
+                  textual, structural or visual relationship. This does not
+                  prove the file is false; it means HPS cannot connect it to a
+                  registered asset with the available evidence.
                 </p>
               </>
             )}
@@ -409,14 +591,17 @@ function VerifyContent() {
 
             <details>
               <summary>Technical data</summary>
-              <pre>{JSON.stringify(
-                {
-                  verification: fileResult,
-                  contentWitness: witnessResult,
-                },
-                null,
-                2
-              )}</pre>
+              <pre>
+                {JSON.stringify(
+                  {
+                    verification: fileResult,
+                    contentWitness: witnessResult,
+                    publicTextAnalysis,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
             </details>
           </div>
         )}
